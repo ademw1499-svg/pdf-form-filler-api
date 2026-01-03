@@ -2,6 +2,8 @@ from flask import Flask, request, jsonify, send_file
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 import io
 import json
 import os
@@ -25,7 +27,7 @@ def fill_employer_form():
     Expected JSON format:
     {
         "recu_par": "Marie Dubois",
-        "forme_juridique": "SRL",  // Will check the right checkbox
+        "forme_juridique": "SRL",
         "nom_societe": "Tech Solutions SPRL",
         ... etc
     }
@@ -52,256 +54,182 @@ def fill_employer_form():
         return jsonify({"error": str(e)}), 500
 
 def fill_pdf_with_data(data):
-    """Fill the PDF form with provided data using annotations"""
+    """Fill the PDF form with provided data using ReportLab overlay"""
     
     # Read the template PDF
     reader = PdfReader(TEMPLATE_PATH)
+    
+    # Create overlay with text
+    packet = io.BytesIO()
+    can = canvas.Canvas(packet, pagesize=(595, 842))  # A4 size in points
+    
+    # Set font
+    can.setFont("Helvetica", 10)
+    can.setFillColorRGB(0, 0, 0)
+    
+    # Helper function to add text
+    def add_text(text, x, y, font_size=10):
+        can.setFont("Helvetica", font_size)
+        can.drawString(x, y, str(text))
+    
+    # Scale factors (image pixels to PDF points)
+    SCALE_X = 595 / 707
+    SCALE_Y = 842 / 1000
+    
+    def convert_y(y_img):
+        """Convert image Y coordinate to PDF Y (flip axis)"""
+        return 842 - (y_img * SCALE_Y)
+    
+    # PAGE 1 FIELDS
+    if data.get('recu_par'):
+        add_text(data['recu_par'], 148 * SCALE_X, convert_y(203))
+    
+    # Legal form checkboxes
+    forme = data.get('forme_juridique', '')
+    if forme == 'SRL':
+        add_text('X', 190 * SCALE_X, convert_y(246), 12)
+    elif forme == 'SC':
+        add_text('X', 234 * SCALE_X, convert_y(246), 12)
+    elif forme == 'SA':
+        add_text('X', 280 * SCALE_X, convert_y(246), 12)
+    elif forme == 'ASBL':
+        add_text('X', 337 * SCALE_X, convert_y(246), 12)
+    elif forme == 'PERSONNE PHYSIQUE':
+        add_text('X', 408 * SCALE_X, convert_y(246), 12)
+    
+    if data.get('nom_societe'):
+        add_text(data['nom_societe'], 217 * SCALE_X, convert_y(282))
+    
+    if data.get('nom_prenom_gerant'):
+        add_text(data['nom_prenom_gerant'], 260 * SCALE_X, convert_y(314))
+    
+    if data.get('niss_gerant'):
+        add_text(data['niss_gerant'], 194 * SCALE_X, convert_y(347))
+    
+    if data.get('adresse_siege_social_1'):
+        add_text(data['adresse_siege_social_1'], 249 * SCALE_X, convert_y(380))
+    
+    if data.get('adresse_siege_social_2'):
+        add_text(data['adresse_siege_social_2'], 249 * SCALE_X, convert_y(397))
+    
+    if data.get('adresse_exploitation_1'):
+        add_text(data['adresse_exploitation_1'], 301 * SCALE_X, convert_y(430))
+    
+    if data.get('adresse_exploitation_2'):
+        add_text(data['adresse_exploitation_2'], 301 * SCALE_X, convert_y(447))
+    
+    if data.get('telephone_gsm'):
+        add_text(data['telephone_gsm'], 204 * SCALE_X, convert_y(513))
+    
+    if data.get('email'):
+        add_text(data['email'], 189 * SCALE_X, convert_y(546))
+    
+    if data.get('num_entreprise'):
+        add_text(data['num_entreprise'], 204 * SCALE_X, convert_y(579))
+    
+    if data.get('num_onss'):
+        add_text(data['num_onss'], 185 * SCALE_X, convert_y(612))
+    
+    if data.get('assurance_loi'):
+        add_text(data['assurance_loi'], 264 * SCALE_X, convert_y(645))
+    
+    if data.get('seppt'):
+        add_text(data['seppt'], 135 * SCALE_X, convert_y(678))
+    
+    if data.get('secteur_activite'):
+        add_text(data['secteur_activite'], 204 * SCALE_X, convert_y(711))
+    
+    # First hire reduction
+    reduction = data.get('reduction_premier', '')
+    if reduction == 'Oui':
+        add_text('X', 69 * SCALE_X, convert_y(773), 12)
+    elif reduction == 'Non':
+        add_text('X', 106 * SCALE_X, convert_y(773), 12)
+    elif reduction == 'Enquete':
+        add_text('X', 151 * SCALE_X, convert_y(773), 12)
+    
+    if data.get('commission_paritaire'):
+        add_text(data['commission_paritaire'], 233 * SCALE_X, convert_y(809))
+    
+    if data.get('indice_onss'):
+        add_text(data['indice_onss'], 174 * SCALE_X, convert_y(842))
+    
+    if data.get('code_nace'):
+        add_text(data['code_nace'], 162 * SCALE_X, convert_y(875))
+    
+    # Save page 1
+    can.showPage()
+    
+    # PAGE 2 FIELDS
+    can.setFont("Helvetica", 10)
+    
+    if data.get('regime_horaire'):
+        add_text(data['regime_horaire'], 204 * SCALE_X, convert_y(152))
+    
+    # Weekly schedule - Monday (using smaller font)
+    can.setFont("Helvetica", 9)
+    schedule_fields = [
+        ('lundi_matin_de', 168, 234),
+        ('lundi_matin_a', 221, 234),
+        ('lundi_pause_de', 340, 234),
+        ('lundi_pause_a', 393, 234),
+        ('lundi_apres_de', 540, 234),
+        ('lundi_apres_a', 593, 234),
+    ]
+    
+    for field_name, x, y in schedule_fields:
+        if data.get(field_name):
+            add_text(data[field_name], x * SCALE_X, convert_y(y), 9)
+    
+    can.setFont("Helvetica", 10)
+    
+    if data.get('cameras'):
+        add_text(data['cameras'], 340 * SCALE_X, convert_y(374))
+    
+    if data.get('trousse_secours'):
+        add_text(data['trousse_secours'], 323 * SCALE_X, convert_y(424))
+    
+    if data.get('nom_comptable'):
+        add_text(data['nom_comptable'], 221 * SCALE_X, convert_y(589))
+    
+    # Origin checkbox
+    origine = data.get('origine', '')
+    if origine == 'Internet':
+        add_text('X', 138 * SCALE_X, convert_y(668), 12)
+    elif origine == 'Comptable':
+        add_text('X', 334 * SCALE_X, convert_y(668), 12)
+    elif origine == 'Client':
+        add_text('X', 138 * SCALE_X, convert_y(702), 12)
+    elif origine == 'Autre':
+        add_text('X', 334 * SCALE_X, convert_y(702), 12)
+    
+    if data.get('date_signature'):
+        add_text(data['date_signature'], 123 * SCALE_X, convert_y(852))
+    
+    can.save()
+    
+    # Merge overlay with template
+    packet.seek(0)
+    overlay = PdfReader(packet)
+    
     writer = PdfWriter()
     
-    # Copy all pages
-    for page in reader.pages:
-        writer.add_page(page)
+    # Merge page 1
+    page1 = reader.pages[0]
+    page1.merge_page(overlay.pages[0])
+    writer.add_page(page1)
     
-    # Create annotations for each field
-    annotations = create_annotations(data)
+    # Merge page 2
+    page2 = reader.pages[1]
+    page2.merge_page(overlay.pages[1])
+    writer.add_page(page2)
     
-    # Add annotations to the appropriate pages
-    for page_num, page_annotations in annotations.items():
-        page = writer.pages[page_num - 1]  # PDF pages are 0-indexed
-        
-        for annotation in page_annotations:
-            page.add_text_annotation(
-                text=annotation['text'],
-                rect=annotation['rect'],
-                color=(0, 0, 0)
-            )
-    
-    # Write to BytesIO object
+    # Write to BytesIO
     output = io.BytesIO()
     writer.write(output)
     output.seek(0)
     
     return output
-
-def create_annotations(data):
-    """
-    Create PDF annotations based on input data
-    Returns a dict with page numbers as keys and lists of annotations as values
-    """
-    
-    # Get PDF dimensions (707x1000 pixels from our analysis)
-    # PDF points are different - typically 1 point = 1/72 inch
-    # We need to convert pixel coordinates to PDF points
-    
-    # For A4 at 72 DPI: width=595pt, height=842pt
-    # Our images were 707x1000 pixels
-    # Scale factor: PDF_width/image_width = 595/707 ≈ 0.84
-    
-    SCALE_X = 595 / 707  # Horizontal scale
-    SCALE_Y = 842 / 1000  # Vertical scale
-    
-    annotations = {1: [], 2: []}
-    
-    # Helper function to convert image coords to PDF coords
-    def convert_coords(x1, y1, x2, y2):
-        """Convert image pixel coords to PDF points (from bottom-left origin)"""
-        pdf_x1 = x1 * SCALE_X
-        pdf_y1 = (1000 - y2) * SCALE_Y  # Flip Y axis
-        pdf_x2 = x2 * SCALE_X
-        pdf_y2 = (1000 - y1) * SCALE_Y  # Flip Y axis
-        return [pdf_x1, pdf_y1, pdf_x2, pdf_y2]
-    
-    # PAGE 1 FIELDS
-    if data.get('recu_par'):
-        annotations[1].append({
-            'text': data['recu_par'],
-            'rect': convert_coords(148, 191, 335, 203)
-        })
-    
-    # Legal form checkboxes
-    forme = data.get('forme_juridique', '')
-    if forme == 'SRL':
-        annotations[1].append({'text': 'X', 'rect': convert_coords(190, 232, 202, 246)})
-    elif forme == 'SC':
-        annotations[1].append({'text': 'X', 'rect': convert_coords(234, 232, 246, 246)})
-    elif forme == 'SA':
-        annotations[1].append({'text': 'X', 'rect': convert_coords(280, 232, 292, 246)})
-    elif forme == 'ASBL':
-        annotations[1].append({'text': 'X', 'rect': convert_coords(337, 232, 349, 246)})
-    elif forme == 'PERSONNE PHYSIQUE':
-        annotations[1].append({'text': 'X', 'rect': convert_coords(408, 232, 420, 246)})
-    
-    if data.get('nom_societe'):
-        annotations[1].append({
-            'text': data['nom_societe'],
-            'rect': convert_coords(217, 267, 655, 282)
-        })
-    
-    if data.get('nom_prenom_gerant'):
-        annotations[1].append({
-            'text': data['nom_prenom_gerant'],
-            'rect': convert_coords(260, 299, 655, 314)
-        })
-    
-    if data.get('niss_gerant'):
-        annotations[1].append({
-            'text': data['niss_gerant'],
-            'rect': convert_coords(194, 332, 655, 347)
-        })
-    
-    if data.get('adresse_siege_social_1'):
-        annotations[1].append({
-            'text': data['adresse_siege_social_1'],
-            'rect': convert_coords(249, 365, 655, 380)
-        })
-    
-    if data.get('adresse_siege_social_2'):
-        annotations[1].append({
-            'text': data['adresse_siege_social_2'],
-            'rect': convert_coords(249, 382, 655, 397)
-        })
-    
-    if data.get('adresse_exploitation_1'):
-        annotations[1].append({
-            'text': data['adresse_exploitation_1'],
-            'rect': convert_coords(301, 415, 655, 430)
-        })
-    
-    if data.get('adresse_exploitation_2'):
-        annotations[1].append({
-            'text': data['adresse_exploitation_2'],
-            'rect': convert_coords(301, 432, 655, 447)
-        })
-    
-    if data.get('telephone_gsm'):
-        annotations[1].append({
-            'text': data['telephone_gsm'],
-            'rect': convert_coords(204, 498, 655, 513)
-        })
-    
-    if data.get('email'):
-        annotations[1].append({
-            'text': data['email'],
-            'rect': convert_coords(189, 531, 655, 546)
-        })
-    
-    if data.get('num_entreprise'):
-        annotations[1].append({
-            'text': data['num_entreprise'],
-            'rect': convert_coords(204, 564, 655, 579)
-        })
-    
-    if data.get('num_onss'):
-        annotations[1].append({
-            'text': data['num_onss'],
-            'rect': convert_coords(185, 597, 655, 612)
-        })
-    
-    if data.get('assurance_loi'):
-        annotations[1].append({
-            'text': data['assurance_loi'],
-            'rect': convert_coords(264, 630, 655, 645)
-        })
-    
-    if data.get('seppt'):
-        annotations[1].append({
-            'text': data['seppt'],
-            'rect': convert_coords(135, 663, 655, 678)
-        })
-    
-    if data.get('secteur_activite'):
-        annotations[1].append({
-            'text': data['secteur_activite'],
-            'rect': convert_coords(204, 696, 655, 711)
-        })
-    
-    # First hire reduction
-    reduction = data.get('reduction_premier', '')
-    if reduction == 'Oui':
-        annotations[1].append({'text': 'X', 'rect': convert_coords(69, 761, 81, 773)})
-    elif reduction == 'Non':
-        annotations[1].append({'text': 'X', 'rect': convert_coords(106, 761, 118, 773)})
-    elif reduction == 'Enquete':
-        annotations[1].append({'text': 'X', 'rect': convert_coords(151, 761, 163, 773)})
-    
-    if data.get('commission_paritaire'):
-        annotations[1].append({
-            'text': data['commission_paritaire'],
-            'rect': convert_coords(233, 794, 655, 809)
-        })
-    
-    if data.get('indice_onss'):
-        annotations[1].append({
-            'text': data['indice_onss'],
-            'rect': convert_coords(174, 827, 655, 842)
-        })
-    
-    if data.get('code_nace'):
-        annotations[1].append({
-            'text': data['code_nace'],
-            'rect': convert_coords(162, 860, 655, 875)
-        })
-    
-    # PAGE 2 FIELDS
-    if data.get('regime_horaire'):
-        annotations[2].append({
-            'text': data['regime_horaire'],
-            'rect': convert_coords(204, 137, 280, 152)
-        })
-    
-    # Weekly schedule - Monday
-    schedule_fields = [
-        ('lundi_matin_de', 168, 219, 212, 234),
-        ('lundi_matin_a', 221, 219, 265, 234),
-        ('lundi_pause_de', 340, 219, 384, 234),
-        ('lundi_pause_a', 393, 219, 437, 234),
-        ('lundi_apres_de', 540, 219, 584, 234),
-        ('lundi_apres_a', 593, 219, 637, 234),
-    ]
-    
-    for field_name, x1, y1, x2, y2 in schedule_fields:
-        if data.get(field_name):
-            annotations[2].append({
-                'text': data[field_name],
-                'rect': convert_coords(x1, y1, x2, y2)
-            })
-    
-    if data.get('cameras'):
-        annotations[2].append({
-            'text': data['cameras'],
-            'rect': convert_coords(340, 359, 655, 374)
-        })
-    
-    if data.get('trousse_secours'):
-        annotations[2].append({
-            'text': data['trousse_secours'],
-            'rect': convert_coords(323, 409, 655, 424)
-        })
-    
-    if data.get('nom_comptable'):
-        annotations[2].append({
-            'text': data['nom_comptable'],
-            'rect': convert_coords(221, 574, 655, 589)
-        })
-    
-    # Origin checkbox
-    origine = data.get('origine', '')
-    if origine == 'Internet':
-        annotations[2].append({'text': 'X', 'rect': convert_coords(138, 656, 150, 668)})
-    elif origine == 'Comptable':
-        annotations[2].append({'text': 'X', 'rect': convert_coords(334, 656, 346, 668)})
-    elif origine == 'Client':
-        annotations[2].append({'text': 'X', 'rect': convert_coords(138, 690, 150, 702)})
-    elif origine == 'Autre':
-        annotations[2].append({'text': 'X', 'rect': convert_coords(334, 690, 346, 702)})
-    
-    if data.get('date_signature'):
-        annotations[2].append({
-            'text': data['date_signature'],
-            'rect': convert_coords(123, 840, 330, 852)
-        })
-    
-    return annotations
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
