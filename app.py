@@ -55,11 +55,14 @@ def fill_pdf_with_data(data):
         x_pdf, y_pdf = convert_coords(x_img, y_img)
         can.drawString(x_pdf, y_pdf, str(text))
     
-    # PAGE 1 - All coordinates adjusted to START AFTER THE LABEL
+    # PAGE 1 - ALL TEXT ALIGNED AT SAME X POSITION (like a column)
+    # Using X=440 where "Test User" looks perfect
     
-    # "Reçu par :" - text starts after colon
+    ALIGN_X = 440  # Consistent X position for all text fields
+    
+    # "Reçu par :" 
     if data.get('recu_par'):
-        add_text(data['recu_par'], 185, 197)
+        add_text(data['recu_par'], ALIGN_X, 197)
     
     # Legal form checkboxes - BEFORE the label text
     forme = data.get('forme_juridique', '')
@@ -74,61 +77,61 @@ def fill_pdf_with_data(data):
     elif forme == 'PERSONNE PHYSIQUE':
         add_text('X', 415, 235, 12)
     
-    # "Nom de la société:" - text starts after colon
+    # "Nom de la société:"
     if data.get('nom_societe'):
-        add_text(data['nom_societe'], 300, 275)
+        add_text(data['nom_societe'], ALIGN_X, 275)
     
-    # "Nom & Prénom du gérant" - text starts after label
+    # "Nom & Prénom du gérant"
     if data.get('nom_prenom_gerant'):
-        add_text(data['nom_prenom_gerant'], 335, 308)
+        add_text(data['nom_prenom_gerant'], ALIGN_X, 308)
     
-    # "NISS du gérant" - text starts after label
+    # "NISS du gérant"
     if data.get('niss_gerant'):
-        add_text(data['niss_gerant'], 240, 340)
+        add_text(data['niss_gerant'], ALIGN_X, 340)
     
-    # "Adresse du siège social" - text starts after label
+    # "Adresse du siège social"
     if data.get('adresse_siege_social_1'):
-        add_text(data['adresse_siege_social_1'], 325, 373)
+        add_text(data['adresse_siege_social_1'], ALIGN_X, 373)
     
-    # Second line of address (no label, just continuation)
+    # Second line of address
     if data.get('adresse_siege_social_2'):
-        add_text(data['adresse_siege_social_2'], 325, 390)
+        add_text(data['adresse_siege_social_2'], ALIGN_X, 390)
     
-    # "Adresse du siège d'exploitation" - text starts after label
+    # "Adresse du siège d'exploitation"
     if data.get('adresse_exploitation_1'):
-        add_text(data['adresse_exploitation_1'], 325, 423)
+        add_text(data['adresse_exploitation_1'], ALIGN_X, 423)
     
     # Second line
     if data.get('adresse_exploitation_2'):
-        add_text(data['adresse_exploitation_2'], 325, 440)
+        add_text(data['adresse_exploitation_2'], ALIGN_X, 440)
     
-    # "Téléphone / GSM" - text starts after label
+    # "Téléphone / GSM"
     if data.get('telephone_gsm'):
-        add_text(data['telephone_gsm'], 260, 505)
+        add_text(data['telephone_gsm'], ALIGN_X, 505)
     
-    # "Adresse e-mail" - text starts after label
+    # "Adresse e-mail"
     if data.get('email'):
-        add_text(data['email'], 245, 538)
+        add_text(data['email'], ALIGN_X, 538)
     
-    # "N° d'entreprise." - text starts after label
+    # "N° d'entreprise."
     if data.get('num_entreprise'):
-        add_text(data['num_entreprise'], 280, 571)
+        add_text(data['num_entreprise'], ALIGN_X, 571)
     
-    # "Numéro ONSS" - text starts after label
+    # "Numéro ONSS"
     if data.get('num_onss'):
-        add_text(data['num_onss'], 240, 604)
+        add_text(data['num_onss'], ALIGN_X, 604)
     
-    # "Assurance loi via le client" - text starts after label
+    # "Assurance loi via le client"
     if data.get('assurance_loi'):
-        add_text(data['assurance_loi'], 360, 637)
+        add_text(data['assurance_loi'], ALIGN_X, 637)
     
-    # "SEPPT" - text starts after label
+    # "SEPPT"
     if data.get('seppt'):
-        add_text(data['seppt'], 180, 670)
+        add_text(data['seppt'], ALIGN_X, 670)
     
-    # "Secteur d'activité" - text starts after label
+    # "Secteur d'activité"
     if data.get('secteur_activite'):
-        add_text(data['secteur_activite'], 265, 703)
+        add_text(data['secteur_activite'], ALIGN_X, 703)
     
     # First hire reduction checkboxes (Oui/Non/Enquete)
     reduction = data.get('reduction_premier', '')
@@ -161,9 +164,11 @@ def fill_pdf_with_data(data):
     # Save page 1
     can.showPage()
     
-    # PAGE 2
+    # PAGE 2 - ALSO ALIGNED
     
-    # "Régime horaire" - text starts after label
+    PAGE2_ALIGN_X = 440  # Same alignment for page 2
+    
+    # "Régime horaire"
     if data.get('regime_horaire'):
         add_text(data['regime_horaire'], 255, 146)
     
@@ -270,13 +275,13 @@ def fill_pdf_with_data(data):
     
     can.setFont("Helvetica", 10)
     
-    # "Nombre et Situation des caméras" - text starts after label
+    # "Nombre et Situation des caméras"
     if data.get('cameras'):
-        add_text(data['cameras'], 430, 365)
+        add_text(data['cameras'], PAGE2_ALIGN_X, 365)
     
-    # "Situation de la trousse de secours" - text starts after label
+    # "Situation de la trousse de secours"
     if data.get('trousse_secours'):
-        add_text(data['trousse_secours'], 410, 415)
+        add_text(data['trousse_secours'], PAGE2_ALIGN_X, 415)
     
     # Work clothes provision checkboxes (Oui/Non)
     vetements_fourniture = data.get('vetements_fourniture', '')
@@ -292,21 +297,21 @@ def fill_pdf_with_data(data):
     elif vetements_entretien == 'Non':
         add_text('X', 479, 481, 12)
     
-    # "Primes nuit / week-end / autres" - text starts after label
+    # "Primes nuit / week-end / autres"
     if data.get('primes'):
-        add_text(data['primes'], 380, 514)
+        add_text(data['primes'], PAGE2_ALIGN_X, 514)
     
-    # "Secrétariat social actuel" - text starts after label
+    # "Secrétariat social actuel"
     if data.get('secretariat_actuel'):
-        add_text(data['secretariat_actuel'], 310, 547)
+        add_text(data['secretariat_actuel'], PAGE2_ALIGN_X, 547)
     
-    # "Nom du comptable" - text starts after label
+    # "Nom du comptable"
     if data.get('nom_comptable'):
-        add_text(data['nom_comptable'], 265, 580)
+        add_text(data['nom_comptable'], PAGE2_ALIGN_X, 580)
     
-    # "Coordonnées du comptable" - text starts after label
+    # "Coordonnées du comptable"
     if data.get('coord_comptable'):
-        add_text(data['coord_comptable'], 330, 613)
+        add_text(data['coord_comptable'], PAGE2_ALIGN_X, 613)
     
     # Origin checkboxes (Internet/Comptable/Client/Autre)
     origine = data.get('origine', '')
