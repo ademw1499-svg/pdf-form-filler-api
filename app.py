@@ -55,55 +55,55 @@ def fill_pdf_with_data(data):
         y_pdf = convert_y(y_bottom_img)  # Use BOTTOM of box
         can.drawString(x_pdf, y_pdf, str(text))
     
-    # PAGE 1 - Using BOTTOM Y-coordinate of each box
+    # PAGE 1 - Positioned ON the dotted lines (moved down 15 pixels from original)
     if data.get('recu_par'):
-        add_text(data['recu_par'], 148, 203)  # Bottom of box
+        add_text(data['recu_par'], 148, 218)  # ON the dots
     
-    # Legal form checkboxes
+    # Legal form checkboxes - stay higher (inside boxes)
     forme = data.get('forme_juridique', '')
     if forme == 'SRL':
-        add_text('X', 190, 246, 12)
+        add_text('X', 190, 238, 12)
     elif forme == 'SC':
-        add_text('X', 234, 246, 12)
+        add_text('X', 234, 238, 12)
     elif forme == 'SA':
-        add_text('X', 280, 246, 12)
+        add_text('X', 280, 238, 12)
     elif forme == 'ASBL':
-        add_text('X', 337, 246, 12)
+        add_text('X', 337, 238, 12)
     elif forme == 'PERSONNE PHYSIQUE':
-        add_text('X', 408, 246, 12)
+        add_text('X', 408, 238, 12)
     
     if data.get('nom_societe'):
-        add_text(data['nom_societe'], 217, 282)
+        add_text(data['nom_societe'], 217, 297)  # ON the dots
     
     if data.get('nom_prenom_gerant'):
-        add_text(data['nom_prenom_gerant'], 260, 314)
+        add_text(data['nom_prenom_gerant'], 260, 329)  # ON the dots
     
     if data.get('niss_gerant'):
-        add_text(data['niss_gerant'], 194, 347)
+        add_text(data['niss_gerant'], 194, 362)  # ON the dots
     
     if data.get('adresse_siege_social_1'):
-        add_text(data['adresse_siege_social_1'], 249, 380)
+        add_text(data['adresse_siege_social_1'], 249, 395)  # ON the dots
     
     if data.get('adresse_siege_social_2'):
-        add_text(data['adresse_siege_social_2'], 249, 397)
+        add_text(data['adresse_siege_social_2'], 249, 412)  # ON the dots (second line)
     
     if data.get('adresse_exploitation_1'):
-        add_text(data['adresse_exploitation_1'], 301, 430)
+        add_text(data['adresse_exploitation_1'], 301, 445)  # ON the dots
     
     if data.get('adresse_exploitation_2'):
-        add_text(data['adresse_exploitation_2'], 301, 447)
+        add_text(data['adresse_exploitation_2'], 301, 462)  # ON the dots (second line)
     
     if data.get('telephone_gsm'):
-        add_text(data['telephone_gsm'], 204, 513)
+        add_text(data['telephone_gsm'], 204, 528)  # ON the dots
     
     if data.get('email'):
-        add_text(data['email'], 189, 546)
+        add_text(data['email'], 189, 561)  # ON the dots
     
     if data.get('num_entreprise'):
-        add_text(data['num_entreprise'], 204, 579)
+        add_text(data['num_entreprise'], 204, 594)  # ON the dots
     
     if data.get('num_onss'):
-        add_text(data['num_onss'], 185, 612)
+        add_text(data['num_onss'], 185, 627)  # ON the dots
     
     if data.get('assurance_loi'):
         add_text(data['assurance_loi'], 264, 645)
