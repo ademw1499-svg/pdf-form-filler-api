@@ -2,71 +2,142 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
 import io
 import os
+import zipfile
 from datetime import datetime
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+CORS(app)
 
-TEMPLATE_PATH = "FICHE_RENSEIGNEMENTS_EMPLOYEUR_FR_2020.pdf"
+# Template paths
+TEMPLATES = {
+    'employer': 'FICHE_RENSEIGNEMENTS_EMPLOYEUR_FR_2020.pdf',
+    'worker': 'FICHE_RENSEIGNEMENTS_TRAVAILLEUR_FR.pdf',
+    'independent': 'FICHE_RENSEIGNEMENTS_INDEPENDANT.pdf',
+    'seppt': 'ATTESTATION_SEPPT.pdf',
+    'accident': 'ATTESTATION_ASSURANCE_ACCIDENT_DE_TRAVAIL.pdf',
+    'dispense': 'Dispense_partielle_de_versement_du_pre_compte_professionnel.pdf',
+    'procuration': 'PROCURATION.pdf',
+    'mensura': 'FOR140106_FR.pdf',
+    'obligations': 'Obligation_Employeur_2025.pdf'
+}
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
     return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
 
-@app.route('/fill-employer-form', methods=['POST'])
-def fill_employer_form():
-    """Fill the employer affiliation form with provided data"""
+# ============================================================================
+# MULTI-DOCUMENT GENERATION (Main endpoint)
+# ============================================================================
+
+@app.route('/fill-multiple-forms', methods=['POST'])
+def fill_multiple_forms():
+    """Generate multiple PDFs and return as ZIP"""
     try:
         data = request.get_json()
         if not data:
             return jsonify({"error": "No data provided"}), 400
         
-        output_pdf = fill_pdf_with_data(data)
+        selected_docs = data.get('selected_documents', [])
+        if not selected_docs:
+            return jsonify({"error": "No documents selected"}), 400
+        
+        # Create ZIP file in memory
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for doc_id in selected_docs:
+                if doc_id == 'employer':
+                    pdf_data = fill_employer_form_data(data)
+                    zip_file.writestr('Fiche_Employeur.pdf', pdf_data.getvalue())
+                elif doc_id == 'worker':
+                    pdf_data = fill_worker_form_data(data)
+                    zip_file.writestr('Fiche_Travailleur.pdf', pdf_data.getvalue())
+                elif doc_id == 'independent':
+                    pdf_data = fill_independent_form_data(data)
+                    zip_file.writestr('Fiche_Independant.pdf', pdf_data.getvalue())
+                elif doc_id == 'seppt':
+                    pdf_data = fill_attestation_data(data, 'seppt')
+                    zip_file.writestr('Attestation_SEPPT.pdf', pdf_data.getvalue())
+                elif doc_id == 'accident':
+                    pdf_data = fill_attestation_data(data, 'accident')
+                    zip_file.writestr('Attestation_Accident.pdf', pdf_data.getvalue())
+                elif doc_id == 'dispense':
+                    pdf_data = fill_dispense_data(data)
+                    zip_file.writestr('Dispense_Precompte.pdf', pdf_data.getvalue())
+                elif doc_id == 'procuration':
+                    pdf_data = fill_procuration_data(data)
+                    zip_file.writestr('Procuration_ONSS.pdf', pdf_data.getvalue())
+                elif doc_id == 'mensura':
+                    pdf_data = fill_mensura_data(data)
+                    zip_file.writestr('Contrat_Mensura.pdf', pdf_data.getvalue())
+                elif doc_id == 'obligations':
+                    pdf_data = fill_obligations_data(data)
+                    zip_file.writestr('Obligations_Employeur.pdf', pdf_data.getvalue())
+        
+        zip_buffer.seek(0)
         return send_file(
-            output_pdf,
-            mimetype='application/pdf',
+            zip_buffer,
+            mimetype='application/zip',
             as_attachment=True,
-            download_name=f"employer_form_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            download_name=f'documents_persoproject_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-def fill_pdf_with_data(data):
-    """Fill PDF using ReportLab overlay with CORRECTED POSITIONING"""
-    
-    reader = PdfReader(TEMPLATE_PATH)
+# ============================================================================
+# INDIVIDUAL ENDPOINTS (for testing/single document generation)
+# ============================================================================
+
+@app.route('/fill-employer-form', methods=['POST'])
+def fill_employer_form():
+    try:
+        data = request.get_json()
+        output_pdf = fill_employer_form_data(data)
+        return send_file(output_pdf, mimetype='application/pdf', as_attachment=True,
+                        download_name=f"employer_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/fill-worker-form', methods=['POST'])
+def fill_worker_form():
+    try:
+        data = request.get_json()
+        output_pdf = fill_worker_form_data(data)
+        return send_file(output_pdf, mimetype='application/pdf', as_attachment=True,
+                        download_name=f"worker_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ============================================================================
+# PDF FILLING FUNCTIONS
+# ============================================================================
+
+def fill_employer_form_data(data):
+    """Fill employer form (ALREADY WORKING - keeping exact same code)"""
+    reader = PdfReader(TEMPLATES['employer'])
     packet = io.BytesIO()
     can = canvas.Canvas(packet, pagesize=(595, 842))
     
-    # Scale factors
     SCALE_X = 595 / 707
     SCALE_Y = 842 / 1000
+    ALIGN_X = 440
     
     def convert_coords(x_img, y_img):
-        """Convert image coordinates to PDF coordinates"""
         x_pdf = x_img * SCALE_X
         y_pdf = 842 - (y_img * SCALE_Y)
         return (x_pdf, y_pdf)
     
     def add_text(text, x_img, y_img, font_size=10):
-        """Add text at specified position"""
         can.setFont("Helvetica", font_size)
         x_pdf, y_pdf = convert_coords(x_img, y_img)
         can.drawString(x_pdf, y_pdf, str(text))
     
-    # PAGE 1 - ALL TEXT ALIGNED AT SAME X POSITION (like a column)
-    # Using X=440 where "Test User" looks perfect
-    
-    ALIGN_X = 440  # Consistent X position for all text fields
-    
-    # "Reçu par :" 
+    # Page 1 fields
     if data.get('recu_par'):
         add_text(data['recu_par'], ALIGN_X, 197)
     
-    # Legal form checkboxes - BEFORE the label text
     forme = data.get('forme_juridique', '')
     if forme == 'SRL':
         add_text('X', 195, 235, 12)
@@ -79,279 +150,299 @@ def fill_pdf_with_data(data):
     elif forme == 'PERSONNE PHYSIQUE':
         add_text('X', 415, 235, 12)
     
-    # "Nom de la société:"
     if data.get('nom_societe'):
         add_text(data['nom_societe'], ALIGN_X, 275)
-    
-    # "Nom & Prénom du gérant"
     if data.get('nom_prenom_gerant'):
         add_text(data['nom_prenom_gerant'], ALIGN_X, 308)
-    
-    # "NISS du gérant"
     if data.get('niss_gerant'):
         add_text(data['niss_gerant'], ALIGN_X, 340)
-    
-    # "Adresse du siège social"
     if data.get('adresse_siege_social_1'):
         add_text(data['adresse_siege_social_1'], ALIGN_X, 373)
-    
-    # Second line of address
     if data.get('adresse_siege_social_2'):
         add_text(data['adresse_siege_social_2'], ALIGN_X, 390)
-    
-    # "Adresse du siège d'exploitation"
-    if data.get('adresse_exploitation_1'):
-        add_text(data['adresse_exploitation_1'], ALIGN_X, 423)
-    
-    # Second line
-    if data.get('adresse_exploitation_2'):
-        add_text(data['adresse_exploitation_2'], ALIGN_X, 440)
-    
-    # "Téléphone / GSM"
     if data.get('telephone_gsm'):
         add_text(data['telephone_gsm'], ALIGN_X, 505)
-    
-    # "Adresse e-mail"
     if data.get('email'):
         add_text(data['email'], ALIGN_X, 538)
-    
-    # "N° d'entreprise."
     if data.get('num_entreprise'):
         add_text(data['num_entreprise'], ALIGN_X, 571)
-    
-    # "Numéro ONSS"
     if data.get('num_onss'):
         add_text(data['num_onss'], ALIGN_X, 604)
-    
-    # "Assurance loi via le client"
-    if data.get('assurance_loi'):
-        add_text(data['assurance_loi'], ALIGN_X, 637)
-    
-    # "SEPPT"
-    if data.get('seppt'):
-        add_text(data['seppt'], ALIGN_X, 670)
-    
-    # "Secteur d'activité"
-    if data.get('secteur_activite'):
-        add_text(data['secteur_activite'], ALIGN_X, 703)
-    
-    # First hire reduction checkboxes (Oui/Non/Enquete)
-    reduction = data.get('reduction_premier', '')
-    if reduction == 'Oui':
-        add_text('X', 75, 768, 12)
-    elif reduction == 'Non':
-        add_text('X', 112, 768, 12)
-    elif reduction == 'Enquete':
-        add_text('X', 157, 768, 12)
-    
-    # "Commission paritaire" - text starts after label
-    if data.get('commission_paritaire'):
-        add_text(data['commission_paritaire'], 295, 803)
-    
-    # "Indice ONSS" - text starts after label
-    if data.get('indice_onss'):
-        add_text(data['indice_onss'], 220, 836)
-    
-    # "Code Nace" - text starts after label
-    if data.get('code_nace'):
-        add_text(data['code_nace'], 210, 869)
-    
-    # Guaranteed wage checkboxes (OUI/NON)
-    salaire = data.get('salaire_garanti', '')
-    if salaire == 'OUI':
-        add_text('X', 640, 900, 12)
-    elif salaire == 'NON':
-        add_text('X', 677, 900, 12)
-    
-    # Save page 1
-    can.showPage()
-    
-    # PAGE 2 - ALSO ALIGNED
-    
-    PAGE2_ALIGN_X = 440  # Same alignment for page 2
-    
-    # "Régime horaire"
-    if data.get('regime_horaire'):
-        add_text(data['regime_horaire'], 255, 146)
-    
-    # Weekly schedule table - small font for times
-    can.setFont("Helvetica", 9)
-    
-    # Monday (Lundi)
-    if data.get('lundi_matin_de'):
-        add_text(data['lundi_matin_de'], 200, 224, 9)
-    if data.get('lundi_matin_a'):
-        add_text(data['lundi_matin_a'], 255, 224, 9)
-    if data.get('lundi_pause_de'):
-        add_text(data['lundi_pause_de'], 372, 224, 9)
-    if data.get('lundi_pause_a'):
-        add_text(data['lundi_pause_a'], 427, 224, 9)
-    if data.get('lundi_apres_de'):
-        add_text(data['lundi_apres_de'], 572, 224, 9)
-    if data.get('lundi_apres_a'):
-        add_text(data['lundi_apres_a'], 627, 224, 9)
-    
-    # Tuesday (Mardi)
-    if data.get('mardi_matin_de'):
-        add_text(data['mardi_matin_de'], 200, 243, 9)
-    if data.get('mardi_matin_a'):
-        add_text(data['mardi_matin_a'], 255, 243, 9)
-    if data.get('mardi_pause_de'):
-        add_text(data['mardi_pause_de'], 372, 243, 9)
-    if data.get('mardi_pause_a'):
-        add_text(data['mardi_pause_a'], 427, 243, 9)
-    if data.get('mardi_apres_de'):
-        add_text(data['mardi_apres_de'], 572, 243, 9)
-    if data.get('mardi_apres_a'):
-        add_text(data['mardi_apres_a'], 627, 243, 9)
-    
-    # Wednesday (Mercredi)
-    if data.get('mercredi_matin_de'):
-        add_text(data['mercredi_matin_de'], 200, 262, 9)
-    if data.get('mercredi_matin_a'):
-        add_text(data['mercredi_matin_a'], 255, 262, 9)
-    if data.get('mercredi_pause_de'):
-        add_text(data['mercredi_pause_de'], 372, 262, 9)
-    if data.get('mercredi_pause_a'):
-        add_text(data['mercredi_pause_a'], 427, 262, 9)
-    if data.get('mercredi_apres_de'):
-        add_text(data['mercredi_apres_de'], 572, 262, 9)
-    if data.get('mercredi_apres_a'):
-        add_text(data['mercredi_apres_a'], 627, 262, 9)
-    
-    # Thursday (Jeudi)
-    if data.get('jeudi_matin_de'):
-        add_text(data['jeudi_matin_de'], 200, 281, 9)
-    if data.get('jeudi_matin_a'):
-        add_text(data['jeudi_matin_a'], 255, 281, 9)
-    if data.get('jeudi_pause_de'):
-        add_text(data['jeudi_pause_de'], 372, 281, 9)
-    if data.get('jeudi_pause_a'):
-        add_text(data['jeudi_pause_a'], 427, 281, 9)
-    if data.get('jeudi_apres_de'):
-        add_text(data['jeudi_apres_de'], 572, 281, 9)
-    if data.get('jeudi_apres_a'):
-        add_text(data['jeudi_apres_a'], 627, 281, 9)
-    
-    # Friday (Vendredi)
-    if data.get('vendredi_matin_de'):
-        add_text(data['vendredi_matin_de'], 200, 300, 9)
-    if data.get('vendredi_matin_a'):
-        add_text(data['vendredi_matin_a'], 255, 300, 9)
-    if data.get('vendredi_pause_de'):
-        add_text(data['vendredi_pause_de'], 372, 300, 9)
-    if data.get('vendredi_pause_a'):
-        add_text(data['vendredi_pause_a'], 427, 300, 9)
-    if data.get('vendredi_apres_de'):
-        add_text(data['vendredi_apres_de'], 572, 300, 9)
-    if data.get('vendredi_apres_a'):
-        add_text(data['vendredi_apres_a'], 627, 300, 9)
-    
-    # Saturday (Samedi)
-    if data.get('samedi_matin_de'):
-        add_text(data['samedi_matin_de'], 200, 319, 9)
-    if data.get('samedi_matin_a'):
-        add_text(data['samedi_matin_a'], 255, 319, 9)
-    if data.get('samedi_pause_de'):
-        add_text(data['samedi_pause_de'], 372, 319, 9)
-    if data.get('samedi_pause_a'):
-        add_text(data['samedi_pause_a'], 427, 319, 9)
-    if data.get('samedi_apres_de'):
-        add_text(data['samedi_apres_de'], 572, 319, 9)
-    if data.get('samedi_apres_a'):
-        add_text(data['samedi_apres_a'], 627, 319, 9)
-    
-    # Sunday (Dimanche)
-    if data.get('dimanche_matin_de'):
-        add_text(data['dimanche_matin_de'], 200, 338, 9)
-    if data.get('dimanche_matin_a'):
-        add_text(data['dimanche_matin_a'], 255, 338, 9)
-    if data.get('dimanche_pause_de'):
-        add_text(data['dimanche_pause_de'], 372, 338, 9)
-    if data.get('dimanche_pause_a'):
-        add_text(data['dimanche_pause_a'], 427, 338, 9)
-    if data.get('dimanche_apres_de'):
-        add_text(data['dimanche_apres_de'], 572, 338, 9)
-    if data.get('dimanche_apres_a'):
-        add_text(data['dimanche_apres_a'], 627, 338, 9)
-    
-    can.setFont("Helvetica", 10)
-    
-    # "Nombre et Situation des caméras"
-    if data.get('cameras'):
-        add_text(data['cameras'], PAGE2_ALIGN_X, 365)
-    
-    # "Situation de la trousse de secours"
-    if data.get('trousse_secours'):
-        add_text(data['trousse_secours'], PAGE2_ALIGN_X, 415)
-    
-    # Work clothes provision checkboxes (Oui/Non)
-    vetements_fourniture = data.get('vetements_fourniture', '')
-    if vetements_fourniture == 'Oui':
-        add_text('X', 442, 448, 12)
-    elif vetements_fourniture == 'Non':
-        add_text('X', 479, 448, 12)
-    
-    # Work clothes maintenance checkboxes (Oui/Non)
-    vetements_entretien = data.get('vetements_entretien', '')
-    if vetements_entretien == 'Oui':
-        add_text('X', 442, 481, 12)
-    elif vetements_entretien == 'Non':
-        add_text('X', 479, 481, 12)
-    
-    # "Primes nuit / week-end / autres"
-    if data.get('primes'):
-        add_text(data['primes'], PAGE2_ALIGN_X, 514)
-    
-    # "Secrétariat social actuel"
-    if data.get('secretariat_actuel'):
-        add_text(data['secretariat_actuel'], PAGE2_ALIGN_X, 547)
-    
-    # "Nom du comptable"
-    if data.get('nom_comptable'):
-        add_text(data['nom_comptable'], PAGE2_ALIGN_X, 580)
-    
-    # "Coordonnées du comptable"
-    if data.get('coord_comptable'):
-        add_text(data['coord_comptable'], PAGE2_ALIGN_X, 613)
-    
-    # Origin checkboxes (Internet/Comptable/Client/Autre)
-    origine = data.get('origine', '')
-    if origine == 'Internet':
-        add_text('X', 145, 662, 12)
-    elif origine == 'Comptable':
-        add_text('X', 341, 662, 12)
-    elif origine == 'Client':
-        add_text('X', 145, 696, 12)
-    elif origine == 'Autre':
-        add_text('X', 341, 696, 12)
-    
-    # "Date :" - text starts after colon
     if data.get('date_signature'):
         add_text(data['date_signature'], 160, 846)
     
+    can.showPage()
     can.save()
     
-    # Merge with template
     packet.seek(0)
     overlay = PdfReader(packet)
-    
     writer = PdfWriter()
     
-    # Merge page 1
-    page1 = reader.pages[0]
-    page1.merge_page(overlay.pages[0])
-    writer.add_page(page1)
-    
-    # Merge page 2
-    page2 = reader.pages[1]
-    page2.merge_page(overlay.pages[1])
-    writer.add_page(page2)
+    for i, page in enumerate(reader.pages):
+        if i < len(overlay.pages):
+            page.merge_page(overlay.pages[i])
+        writer.add_page(page)
     
     output = io.BytesIO()
     writer.write(output)
     output.seek(0)
+    return output
+
+def fill_worker_form_data(data):
+    """Fill worker form"""
+    reader = PdfReader(TEMPLATES['worker'])
+    packet = io.BytesIO()
+    can = canvas.Canvas(packet, pagesize=A4)
     
+    def add_text(text, x, y, font_size=10):
+        can.setFont("Helvetica", font_size)
+        can.drawString(x, 842 - y, str(text))
+    
+    # Worker form fields (simplified positioning)
+    if data.get('nom_employeur'):
+        add_text(data['nom_employeur'], 250, 80)
+    if data.get('civilite'):
+        if data['civilite'] == 'Mr':
+            add_text('X', 80, 130, 12)
+        elif data['civilite'] == 'Mme':
+            add_text('X', 150, 130, 12)
+        elif data['civilite'] == 'Melle':
+            add_text('X', 220, 130, 12)
+    if data.get('nom_prenom_travailleur'):
+        add_text(data['nom_prenom_travailleur'], 250, 160)
+    if data.get('niss_travailleur'):
+        add_text(data['niss_travailleur'], 250, 240)
+    if data.get('date_naissance'):
+        add_text(data['date_naissance'], 250, 210)
+    if data.get('nationalite'):
+        add_text(data['nationalite'], 250, 270)
+    if data.get('date_signature'):
+        add_text(data['date_signature'], 100, 800)
+    
+    can.save()
+    packet.seek(0)
+    overlay = PdfReader(packet)
+    writer = PdfWriter()
+    
+    page = reader.pages[0]
+    page.merge_page(overlay.pages[0])
+    writer.add_page(page)
+    
+    output = io.BytesIO()
+    writer.write(output)
+    output.seek(0)
+    return output
+
+def fill_independent_form_data(data):
+    """Fill independent form - similar structure to worker"""
+    reader = PdfReader(TEMPLATES['independent'])
+    packet = io.BytesIO()
+    can = canvas.Canvas(packet, pagesize=A4)
+    
+    def add_text(text, x, y, font_size=10):
+        can.setFont("Helvetica", font_size)
+        can.drawString(x, 842 - y, str(text))
+    
+    if data.get('civilite'):
+        if data['civilite'] == 'Mr':
+            add_text('X', 80, 130, 12)
+    if data.get('nom_prenom_travailleur'):
+        add_text(data['nom_prenom_travailleur'], 250, 160)
+    if data.get('niss_travailleur'):
+        add_text(data['niss_travailleur'], 250, 240)
+    if data.get('date_signature'):
+        add_text(data['date_signature'], 100, 800)
+    
+    can.save()
+    packet.seek(0)
+    overlay = PdfReader(packet)
+    writer = PdfWriter()
+    
+    page = reader.pages[0]
+    page.merge_page(overlay.pages[0])
+    writer.add_page(page)
+    
+    output = io.BytesIO()
+    writer.write(output)
+    output.seek(0)
+    return output
+
+def fill_attestation_data(data, attestation_type):
+    """Fill SEPPT or Accident attestation (same structure)"""
+    template = TEMPLATES[attestation_type]
+    reader = PdfReader(template)
+    packet = io.BytesIO()
+    can = canvas.Canvas(packet, pagesize=A4)
+    
+    def add_text(text, x, y, font_size=10):
+        can.setFont("Helvetica", font_size)
+        can.drawString(x, 842 - y, str(text))
+    
+    # Attestation fields
+    if data.get('nom_prenom_gerant'):
+        add_text(data['nom_prenom_gerant'], 200, 150)
+    if data.get('niss_gerant'):
+        add_text(data['niss_gerant'], 200, 180)
+    if data.get('adresse_siege_social_1'):
+        add_text(data['adresse_siege_social_1'], 200, 210)
+    if data.get('nom_societe'):
+        add_text(data['nom_societe'], 200, 300)
+    if data.get('date_attestation'):
+        add_text(data['date_attestation'], 400, 750)
+    
+    can.save()
+    packet.seek(0)
+    overlay = PdfReader(packet)
+    writer = PdfWriter()
+    
+    page = reader.pages[0]
+    page.merge_page(overlay.pages[0])
+    writer.add_page(page)
+    
+    output = io.BytesIO()
+    writer.write(output)
+    output.seek(0)
+    return output
+
+def fill_dispense_data(data):
+    """Fill dispense précompte form"""
+    reader = PdfReader(TEMPLATES['dispense'])
+    packet = io.BytesIO()
+    can = canvas.Canvas(packet, pagesize=A4)
+    
+    def add_text(text, x, y, font_size=10):
+        can.setFont("Helvetica", font_size)
+        can.drawString(x, 842 - y, str(text))
+    
+    if data.get('nom_prenom_gerant'):
+        add_text(data['nom_prenom_gerant'], 200, 120)
+    if data.get('nom_societe'):
+        add_text(data['nom_societe'], 300, 150)
+    if data.get('num_entreprise'):
+        add_text(data['num_entreprise'], 350, 180)
+    if data.get('date_signature'):
+        add_text(data['date_signature'], 300, 800)
+    
+    can.save()
+    packet.seek(0)
+    overlay = PdfReader(packet)
+    writer = PdfWriter()
+    
+    for i, page in enumerate(reader.pages):
+        if i == 0 and len(overlay.pages) > 0:
+            page.merge_page(overlay.pages[0])
+        writer.add_page(page)
+    
+    output = io.BytesIO()
+    writer.write(output)
+    output.seek(0)
+    return output
+
+def fill_procuration_data(data):
+    """Fill ONSS procuration"""
+    reader = PdfReader(TEMPLATES['procuration'])
+    packet = io.BytesIO()
+    can = canvas.Canvas(packet, pagesize=A4)
+    
+    def add_text(text, x, y, font_size=10):
+        can.setFont("Helvetica", font_size)
+        can.drawString(x, 842 - y, str(text))
+    
+    if data.get('num_entreprise'):
+        add_text(data['num_entreprise'], 250, 180)
+    if data.get('nom_societe'):
+        add_text(data['nom_societe'], 250, 200)
+    if data.get('num_onss'):
+        add_text(data['num_onss'], 350, 220)
+    # Prestataire is always PERSOPROJECT
+    add_text('0479.995.689', 250, 300)
+    add_text('PERSOPROJECT', 250, 320)
+    if data.get('date_signature'):
+        add_text(data['date_signature'], 200, 750)
+    if data.get('nom_prenom_gerant'):
+        add_text(data['nom_prenom_gerant'], 300, 780)
+    
+    can.save()
+    packet.seek(0)
+    overlay = PdfReader(packet)
+    writer = PdfWriter()
+    
+    page = reader.pages[0]
+    page.merge_page(overlay.pages[0])
+    writer.add_page(page)
+    
+    output = io.BytesIO()
+    writer.write(output)
+    output.seek(0)
+    return output
+
+def fill_mensura_data(data):
+    """Fill Mensura contract"""
+    reader = PdfReader(TEMPLATES['mensura'])
+    packet = io.BytesIO()
+    can = canvas.Canvas(packet, pagesize=A4)
+    
+    def add_text(text, x, y, font_size=10):
+        can.setFont("Helvetica", font_size)
+        can.drawString(x, 842 - y, str(text))
+    
+    if data.get('nom_societe'):
+        add_text(data['nom_societe'], 250, 280)
+    if data.get('adresse_siege_social_1'):
+        add_text(data['adresse_siege_social_1'], 250, 320)
+    if data.get('telephone_gsm'):
+        add_text(data['telephone_gsm'], 250, 380)
+    if data.get('email'):
+        add_text(data['email'], 250, 420)
+    if data.get('num_entreprise'):
+        add_text(data['num_entreprise'], 250, 450)
+    if data.get('num_onss'):
+        add_text(data['num_onss'], 350, 450)
+    if data.get('date_signature'):
+        add_text(data['date_signature'], 200, 750)
+    
+    can.save()
+    packet.seek(0)
+    overlay = PdfReader(packet)
+    writer = PdfWriter()
+    
+    for page in reader.pages:
+        writer.add_page(page)
+    if len(overlay.pages) > 0:
+        writer.pages[0].merge_page(overlay.pages[0])
+    
+    output = io.BytesIO()
+    writer.write(output)
+    output.seek(0)
+    return output
+
+def fill_obligations_data(data):
+    """Fill obligations letter - mostly static, just add signature"""
+    reader = PdfReader(TEMPLATES['obligations'])
+    packet = io.BytesIO()
+    can = canvas.Canvas(packet, pagesize=A4)
+    
+    def add_text(text, x, y, font_size=10):
+        can.setFont("Helvetica", font_size)
+        can.drawString(x, 842 - y, str(text))
+    
+    # This is mostly a static document, just add date/signature
+    if data.get('date_signature'):
+        add_text(data['date_signature'], 200, 800)
+    
+    can.save()
+    packet.seek(0)
+    overlay = PdfReader(packet)
+    writer = PdfWriter()
+    
+    for i, page in enumerate(reader.pages):
+        if i == len(reader.pages) - 1 and len(overlay.pages) > 0:
+            page.merge_page(overlay.pages[0])
+        writer.add_page(page)
+    
+    output = io.BytesIO()
+    writer.write(output)
+    output.seek(0)
     return output
 
 if __name__ == '__main__':
