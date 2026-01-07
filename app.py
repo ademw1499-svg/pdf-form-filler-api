@@ -9,283 +9,429 @@ from datetime import datetime
 app = Flask(__name__)
 CORS(app)
 
-TEMPLATE_PATH = "FICHE_RENSEIGNEMENTS_EMPLOYEUR_FR_2020.pdf"
+TEMPLATES = {
+    'employer': 'FICHE_RENSEIGNEMENTS_EMPLOYEUR_FR_2020.pdf',
+    'travailleur': 'FICHE_RENSEIGNEMENTS_TRAVAILLEUR_FR.pdf',
+    'independant': 'FICHE_RENSEIGNEMENTS_INDEPENDANT.pdf',
+    'att_accident': 'ATTESTATION_ASSURANCE_ACCIDENT_DE_TRAVAIL.pdf',
+    'att_seppt': 'ATTESTATION_SEPPT.pdf',
+    'dispense': 'Dispense_partielle_de_versement_du_pre_compte_professionnel.pdf',
+    'mensura': 'FOR140106_FR.pdf',
+    'procuration': 'PROCURATION.pdf',
+    'offre1': 'offre_de_collab_1.pdf',
+    'offre2': 'offre_de_collab_2.pdf',
+    'offre3': 'offre_de_collab_3.pdf',
+    'offre4': 'offre_de_collab_4.pdf',
+}
+
+SCALE_X, SCALE_Y = 595/707, 842/1000
+
+def cvt(x, y): return (x*SCALE_X, 842-(y*SCALE_Y))
+def txt(c, t, x, y, s=10): c.setFont("Helvetica", s); c.drawString(*cvt(x,y), str(t))
+def newcan(): p=io.BytesIO(); return p, canvas.Canvas(p, pagesize=(595,842))
+
+def merge(tpl, pkt, npg=1):
+    pkt.seek(0); ov=PdfReader(pkt); rd=PdfReader(tpl); wr=PdfWriter()
+    for i in range(len(rd.pages)):
+        pg=rd.pages[i]
+        if i<len(ov.pages): pg.merge_page(ov.pages[i])
+        wr.add_page(pg)
+    out=io.BytesIO(); wr.write(out); out.seek(0); return out
 
 @app.route('/health', methods=['GET'])
-def health_check():
-    return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
+def health(): return jsonify({"status":"healthy","ts":datetime.now().isoformat()})
 
 @app.route('/fill-employer-form', methods=['POST'])
-def fill_employer_form():
+def fill_employer():
+    d=request.get_json()
+    if not d: return jsonify({"error":"No data"}), 400
     try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No data provided"}), 400
-        
-        output_pdf = fill_pdf_with_data(data)
-        return send_file(
-            output_pdf,
-            mimetype='application/pdf',
-            as_attachment=True,
-            download_name=f"employer_form_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-        )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        p,c=newcan()
+        if d.get('recu_par'): txt(c,d['recu_par'],235,198)
+        f=d.get('forme_juridique','')
+        if f=='SRL': txt(c,'X',195,235,12)
+        elif f=='SC': txt(c,'X',240,235,12)
+        elif f=='SA': txt(c,'X',285,235,12)
+        elif f=='ASBL': txt(c,'X',345,235,12)
+        elif f=='PERSONNE PHYSIQUE': txt(c,'X',415,235,12)
+        if d.get('nom_societe'): txt(c,d['nom_societe'],469,277)
+        if d.get('nom_prenom_gerant'): txt(c,d['nom_prenom_gerant'],469,310)
+        if d.get('niss_gerant'): txt(c,d['niss_gerant'],468,344)
+        if d.get('adresse_siege_social_1'): txt(c,d['adresse_siege_social_1'],466,375)
+        if d.get('adresse_siege_social_2'): txt(c,d['adresse_siege_social_2'],465,409)
+        if d.get('adresse_exploitation_1'): txt(c,d['adresse_exploitation_1'],466,443)
+        if d.get('adresse_exploitation_2'): txt(c,d['adresse_exploitation_2'],464,478)
+        if d.get('telephone_gsm'): txt(c,d['telephone_gsm'],461,507)
+        if d.get('email'): txt(c,d['email'],462,539)
+        if d.get('num_entreprise'): txt(c,d['num_entreprise'],462,572)
+        if d.get('num_onss'): txt(c,d['num_onss'],462,604)
+        if d.get('assurance_loi'): txt(c,d['assurance_loi'],464,638)
+        if d.get('seppt'): txt(c,d['seppt'],464,669)
+        if d.get('secteur_activite'): txt(c,d['secteur_activite'],464,703)
+        r=d.get('reduction_premier','')
+        if r=='Oui': txt(c,'X',96,768,12)
+        elif r=='Non': txt(c,'X',133,768,12)
+        if d.get('commission_paritaire'): txt(c,d['commission_paritaire'],462,802)
+        if d.get('indice_onss'): txt(c,d['indice_onss'],463,834)
+        if d.get('code_nace'): txt(c,d['code_nace'],461,868)
+        s=d.get('salaire_garanti','')
+        if s=='OUI': txt(c,'X',581,899,12)
+        elif s=='NON': txt(c,'X',618,899,12)
+        c.showPage()
+        if d.get('regime_horaire'): txt(c,d['regime_horaire'],357,148)
+        for day,y in [('lundi',228),('mardi',247),('mercredi',266),('jeudi',285),('vendredi',304),('samedi',331),('dimanche',351)]:
+            if d.get(f'{day}_matin_de'): txt(c,d[f'{day}_matin_de'],213,y,9)
+            if d.get(f'{day}_matin_a'): txt(c,d[f'{day}_matin_a'],276,y,9)
+            if d.get(f'{day}_pause_de'): txt(c,d[f'{day}_pause_de'],363,y,9)
+            if d.get(f'{day}_pause_a'): txt(c,d[f'{day}_pause_a'],423,y,9)
+            if d.get(f'{day}_apres_de'): txt(c,d[f'{day}_apres_de'],522,y,9)
+            if d.get(f'{day}_apres_a'): txt(c,d[f'{day}_apres_a'],585,y,9)
+        if d.get('cameras'): txt(c,d['cameras'],427,387)
+        if d.get('trousse_secours'): txt(c,d['trousse_secours'],400,453)
+        if d.get('vetements_fourniture')=='Oui': txt(c,'X',348,486,12)
+        elif d.get('vetements_fourniture')=='Non': txt(c,'X',385,485,12)
+        if d.get('vetements_entretien')=='Oui': txt(c,'X',347,518,12)
+        elif d.get('vetements_entretien')=='Non': txt(c,'X',388,518,12)
+        if d.get('primes'): txt(c,d['primes'],394,552)
+        if d.get('secretariat_actuel'): txt(c,d['secretariat_actuel'],394,583)
+        if d.get('nom_comptable'): txt(c,d['nom_comptable'],390,617)
+        if d.get('coord_comptable'): txt(c,d['coord_comptable'],390,648)
+        o=d.get('origine','')
+        if o=='Internet': txt(c,'X',173,683,12)
+        elif o=='Comptable': txt(c,'X',342,683,12)
+        elif o=='Client': txt(c,'X',174,716,12)
+        elif o=='Autre': txt(c,'X',341,716,12)
+        if d.get('date_signature'): txt(c,d['date_signature'],177,843)
+        c.save()
+        return send_file(merge(TEMPLATES['employer'],p,2),mimetype='application/pdf',as_attachment=True,download_name=f"employer_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+    except Exception as e: return jsonify({"error":str(e)}),500
 
-def fill_pdf_with_data(data):
-    reader = PdfReader(TEMPLATE_PATH)
-    packet = io.BytesIO()
-    can = canvas.Canvas(packet, pagesize=(595, 842))
-    
-    SCALE_X = 595 / 707
-    SCALE_Y = 842 / 1000
-    
-    def convert_coords(x_img, y_img):
-        x_pdf = x_img * SCALE_X
-        y_pdf = 842 - (y_img * SCALE_Y)
-        return (x_pdf, y_pdf)
-    
-    def add_text(text, x_img, y_img, font_size=10):
-        can.setFont("Helvetica", font_size)
-        x_pdf, y_pdf = convert_coords(x_img, y_img)
-        can.drawString(x_pdf, y_pdf, str(text))
-    
-    # PAGE 1 - EXACT COORDINATES FROM COORDINATE PICKER
-    if data.get('recu_par'):
-        add_text(data['recu_par'], 235, 198)
-    
-    forme = data.get('forme_juridique', '')
-    if forme == 'SRL':
-        add_text('X', 195, 235, 12)
-    elif forme == 'SC':
-        add_text('X', 240, 235, 12)
-    elif forme == 'SA':
-        add_text('X', 285, 235, 12)
-    elif forme == 'ASBL':
-        add_text('X', 345, 235, 12)
-    elif forme == 'PERSONNE PHYSIQUE':
-        add_text('X', 415, 235, 12)
-    
-    if data.get('nom_societe'):
-        add_text(data['nom_societe'], 469, 277)
-    if data.get('nom_prenom_gerant'):
-        add_text(data['nom_prenom_gerant'], 469, 310)
-    if data.get('niss_gerant'):
-        add_text(data['niss_gerant'], 468, 344)
-    if data.get('adresse_siege_social_1'):
-        add_text(data['adresse_siege_social_1'], 466, 375)
-    if data.get('adresse_siege_social_2'):
-        add_text(data['adresse_siege_social_2'], 465, 409)
-    if data.get('adresse_exploitation_1'):
-        add_text(data['adresse_exploitation_1'], 466, 443)
-    if data.get('adresse_exploitation_2'):
-        add_text(data['adresse_exploitation_2'], 464, 478)
-    if data.get('telephone_gsm'):
-        add_text(data['telephone_gsm'], 461, 507)
-    if data.get('email'):
-        add_text(data['email'], 462, 539)
-    if data.get('num_entreprise'):
-        add_text(data['num_entreprise'], 462, 572)
-    if data.get('num_onss'):
-        add_text(data['num_onss'], 462, 604)
-    if data.get('assurance_loi'):
-        add_text(data['assurance_loi'], 464, 638)
-    if data.get('seppt'):
-        add_text(data['seppt'], 464, 669)
-    if data.get('secteur_activite'):
-        add_text(data['secteur_activite'], 464, 703)
-    
-    # Checkboxes and bottom fields - EXACT COORDINATES
-    reduction = data.get('reduction_premier', '')
-    if reduction == 'Oui':
-        add_text('X', 96, 768, 12)
-    elif reduction == 'Non':
-        add_text('X', 133, 768, 12)
-    
-    if data.get('commission_paritaire'):
-        add_text(data['commission_paritaire'], 462, 802)
-    if data.get('indice_onss'):
-        add_text(data['indice_onss'], 463, 834)
-    if data.get('code_nace'):
-        add_text(data['code_nace'], 461, 868)
-    
-    salaire = data.get('salaire_garanti', '')
-    if salaire == 'OUI':
-        add_text('X', 581, 899, 12)
-    elif salaire == 'NON':
-        add_text('X', 618, 899, 12)
-    
-    can.showPage()
-    
-    # PAGE 2 - EXACT COORDINATES FROM COORDINATE PICKER
-    if data.get('regime_horaire'):
-        add_text(data['regime_horaire'], 357, 148)
-    
-    # Schedule table - Row spacing is ~19-20 pixels
-    # Lundi Y=228
-    if data.get('lundi_matin_de'):
-        add_text(data['lundi_matin_de'], 213, 228, 9)
-    if data.get('lundi_matin_a'):
-        add_text(data['lundi_matin_a'], 276, 228, 9)
-    if data.get('lundi_pause_de'):
-        add_text(data['lundi_pause_de'], 363, 228, 9)
-    if data.get('lundi_pause_a'):
-        add_text(data['lundi_pause_a'], 423, 228, 9)
-    if data.get('lundi_apres_de'):
-        add_text(data['lundi_apres_de'], 522, 227, 9)
-    if data.get('lundi_apres_a'):
-        add_text(data['lundi_apres_a'], 585, 228, 9)
-    
-    # Mardi Y=247
-    if data.get('mardi_matin_de'):
-        add_text(data['mardi_matin_de'], 211, 247, 9)
-    if data.get('mardi_matin_a'):
-        add_text(data['mardi_matin_a'], 276, 247, 9)
-    if data.get('mardi_pause_de'):
-        add_text(data['mardi_pause_de'], 363, 247, 9)
-    if data.get('mardi_pause_a'):
-        add_text(data['mardi_pause_a'], 423, 247, 9)
-    if data.get('mardi_apres_de'):
-        add_text(data['mardi_apres_de'], 522, 247, 9)
-    if data.get('mardi_apres_a'):
-        add_text(data['mardi_apres_a'], 585, 247, 9)
-    
-    # Mercredi Y=266
-    if data.get('mercredi_matin_de'):
-        add_text(data['mercredi_matin_de'], 211, 266, 9)
-    if data.get('mercredi_matin_a'):
-        add_text(data['mercredi_matin_a'], 276, 266, 9)
-    if data.get('mercredi_pause_de'):
-        add_text(data['mercredi_pause_de'], 363, 266, 9)
-    if data.get('mercredi_pause_a'):
-        add_text(data['mercredi_pause_a'], 423, 266, 9)
-    if data.get('mercredi_apres_de'):
-        add_text(data['mercredi_apres_de'], 522, 266, 9)
-    if data.get('mercredi_apres_a'):
-        add_text(data['mercredi_apres_a'], 585, 266, 9)
-    
-    # Jeudi Y=285
-    if data.get('jeudi_matin_de'):
-        add_text(data['jeudi_matin_de'], 211, 285, 9)
-    if data.get('jeudi_matin_a'):
-        add_text(data['jeudi_matin_a'], 276, 285, 9)
-    if data.get('jeudi_pause_de'):
-        add_text(data['jeudi_pause_de'], 363, 285, 9)
-    if data.get('jeudi_pause_a'):
-        add_text(data['jeudi_pause_a'], 423, 285, 9)
-    if data.get('jeudi_apres_de'):
-        add_text(data['jeudi_apres_de'], 522, 285, 9)
-    if data.get('jeudi_apres_a'):
-        add_text(data['jeudi_apres_a'], 585, 285, 9)
-    
-    # Vendredi Y=304
-    if data.get('vendredi_matin_de'):
-        add_text(data['vendredi_matin_de'], 211, 304, 9)
-    if data.get('vendredi_matin_a'):
-        add_text(data['vendredi_matin_a'], 276, 304, 9)
-    if data.get('vendredi_pause_de'):
-        add_text(data['vendredi_pause_de'], 363, 304, 9)
-    if data.get('vendredi_pause_a'):
-        add_text(data['vendredi_pause_a'], 423, 304, 9)
-    if data.get('vendredi_apres_de'):
-        add_text(data['vendredi_apres_de'], 522, 304, 9)
-    if data.get('vendredi_apres_a'):
-        add_text(data['vendredi_apres_a'], 585, 304, 9)
-    
-    # Samedi Y=331
-    if data.get('samedi_matin_de'):
-        add_text(data['samedi_matin_de'], 210, 331, 9)
-    if data.get('samedi_matin_a'):
-        add_text(data['samedi_matin_a'], 276, 331, 9)
-    if data.get('samedi_pause_de'):
-        add_text(data['samedi_pause_de'], 363, 331, 9)
-    if data.get('samedi_pause_a'):
-        add_text(data['samedi_pause_a'], 423, 331, 9)
-    if data.get('samedi_apres_de'):
-        add_text(data['samedi_apres_de'], 522, 331, 9)
-    if data.get('samedi_apres_a'):
-        add_text(data['samedi_apres_a'], 585, 331, 9)
-    
-    # Dimanche Y=351
-    if data.get('dimanche_matin_de'):
-        add_text(data['dimanche_matin_de'], 209, 351, 9)
-    if data.get('dimanche_matin_a'):
-        add_text(data['dimanche_matin_a'], 276, 351, 9)
-    if data.get('dimanche_pause_de'):
-        add_text(data['dimanche_pause_de'], 363, 351, 9)
-    if data.get('dimanche_pause_a'):
-        add_text(data['dimanche_pause_a'], 423, 351, 9)
-    if data.get('dimanche_apres_de'):
-        add_text(data['dimanche_apres_de'], 522, 351, 9)
-    if data.get('dimanche_apres_a'):
-        add_text(data['dimanche_apres_a'], 585, 351, 9)
-    
-    # Other Page 2 fields - EXACT COORDINATES
-    if data.get('cameras'):
-        add_text(data['cameras'], 427, 387)
-    if data.get('trousse_secours'):
-        add_text(data['trousse_secours'], 400, 453)
-    
-    vetements_fourniture = data.get('vetements_fourniture', '')
-    if vetements_fourniture == 'Oui':
-        add_text('X', 348, 486, 12)
-    elif vetements_fourniture == 'Non':
-        add_text('X', 385, 485, 12)
-    
-    vetements_entretien = data.get('vetements_entretien', '')
-    if vetements_entretien == 'Oui':
-        add_text('X', 347, 518, 12)
-    elif vetements_entretien == 'Non':
-        add_text('X', 388, 518, 12)
-    
-    if data.get('primes'):
-        add_text(data['primes'], 394, 552)
-    if data.get('secretariat_actuel'):
-        add_text(data['secretariat_actuel'], 394, 583)
-    if data.get('nom_comptable'):
-        add_text(data['nom_comptable'], 390, 617)
-    if data.get('coord_comptable'):
-        add_text(data['coord_comptable'], 390, 648)
-    
-    origine = data.get('origine', '')
-    if origine == 'Internet':
-        add_text('X', 173, 683, 12)
-    elif origine == 'Comptable':
-        add_text('X', 342, 683, 12)
-    elif origine == 'Client':
-        add_text('X', 174, 716, 12)
-    elif origine == 'Autre':
-        add_text('X', 341, 716, 12)
-    
-    if data.get('date_signature'):
-        add_text(data['date_signature'], 177, 843)
-    
-    # Ensure page 2 exists by adding at least a space
-    can.drawString(0, 0, " ")
-    can.save()
-    
-    packet.seek(0)
-    overlay = PdfReader(packet)
-    
-    writer = PdfWriter()
-    
-    # Page 1
-    page1 = reader.pages[0]
-    if len(overlay.pages) > 0:
-        page1.merge_page(overlay.pages[0])
-    writer.add_page(page1)
-    
-    # Page 2
-    page2 = reader.pages[1]
-    if len(overlay.pages) > 1:
-        page2.merge_page(overlay.pages[1])
-    writer.add_page(page2)
-    
-    output = io.BytesIO()
-    writer.write(output)
-    output.seek(0)
-    
-    return output
+@app.route('/fill-att-accident', methods=['POST'])
+def fill_att_accident():
+    d=request.get_json()
+    if not d: return jsonify({"error":"No data"}),400
+    try:
+        p,c=newcan()
+        if d.get('nom_soussigne'): txt(c,d['nom_soussigne'],283,130)
+        if d.get('niss'): txt(c,d['niss'],283,144)
+        if d.get('domicile_1'): txt(c,d['domicile_1'],283,159)
+        if d.get('domicile_2'): txt(c,d['domicile_2'],282,174)
+        if d.get('qualite'): txt(c,d['qualite'],284,204)
+        if d.get('societe'): txt(c,d['societe'],284,222)
+        if d.get('etablie_1'): txt(c,d['etablie_1'],284,235)
+        if d.get('etablie_2'): txt(c,d['etablie_2'],283,251)
+        if d.get('date_signature'): txt(c,d['date_signature'],237,443)
+        c.save()
+        return send_file(merge(TEMPLATES['att_accident'],p,1),mimetype='application/pdf',as_attachment=True,download_name=f"att_accident_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+    except Exception as e: return jsonify({"error":str(e)}),500
+
+@app.route('/fill-att-seppt', methods=['POST'])
+def fill_att_seppt():
+    d=request.get_json()
+    if not d: return jsonify({"error":"No data"}),400
+    try:
+        p,c=newcan()
+        if d.get('nom_soussigne'): txt(c,d['nom_soussigne'],313,129)
+        if d.get('niss'): txt(c,d['niss'],313,145)
+        if d.get('domicile_1'): txt(c,d['domicile_1'],310,160)
+        if d.get('domicile_2'): txt(c,d['domicile_2'],309,173)
+        if d.get('qualite'): txt(c,d['qualite'],311,205)
+        if d.get('societe'): txt(c,d['societe'],311,220)
+        if d.get('etablie_1'): txt(c,d['etablie_1'],311,236)
+        if d.get('etablie_2'): txt(c,d['etablie_2'],309,252)
+        if d.get('date_signature'): txt(c,d['date_signature'],252,548)
+        c.save()
+        return send_file(merge(TEMPLATES['att_seppt'],p,1),mimetype='application/pdf',as_attachment=True,download_name=f"att_seppt_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+    except Exception as e: return jsonify({"error":str(e)}),500
+
+@app.route('/fill-independant', methods=['POST'])
+def fill_independant():
+    d=request.get_json()
+    if not d: return jsonify({"error":"No data"}),400
+    try:
+        p,c=newcan()
+        if d.get('contrat_email'): txt(c,'X',296,133,12)
+        if d.get('contrat_fax'): txt(c,'X',363,133,12)
+        if d.get('contrat_poste'): txt(c,'X',414,134,12)
+        if d.get('contrat_main'): txt(c,'X',476,133,12)
+        cv=d.get('civilite','')
+        if cv=='Mr': txt(c,'X',139,203,12)
+        elif cv=='Mme': txt(c,'X',300,203,12)
+        elif cv=='Melle': txt(c,'X',459,203,12)
+        if d.get('nom_prenom'): txt(c,d['nom_prenom'],395,233)
+        if d.get('adresse_1'): txt(c,d['adresse_1'],392,258)
+        if d.get('adresse_2'): txt(c,d['adresse_2'],388,286)
+        if d.get('date_lieu_naissance'): txt(c,d['date_lieu_naissance'],392,312)
+        if d.get('niss'): txt(c,d['niss'],391,340)
+        if d.get('nationalite'): txt(c,d['nationalite'],386,367)
+        if d.get('carte_identite'): txt(c,'X',133,396,12)
+        et=d.get('etat_civil','')
+        if et=='Marie': txt(c,'X',283,457,12)
+        elif et=='Veuf': txt(c,'X',472,458,12)
+        elif et=='Celibataire': txt(c,'X',281,484,12)
+        elif et=='Separe': txt(c,'X',475,483,12)
+        elif et=='Divorce': txt(c,'X',283,510,12)
+        elif et=='Cohabitation': txt(c,'X',474,511,12)
+        if d.get('conjoint_charge'): txt(c,'X',91,559,12)
+        if d.get('enfants_charge'): txt(c,'X',288,561,12)
+        if d.get('autre_charge'): txt(c,'X',91,580,12)
+        if d.get('nb_enfants'): txt(c,d['nb_enfants'],606,559)
+        if d.get('nb_handicapes'): txt(c,d['nb_handicapes'],607,579)
+        if d.get('remuneration'): txt(c,d['remuneration'],350,639)
+        if d.get('loi_sociale'): txt(c,'X',133,683,12)
+        if d.get('loi_sociale_val'): txt(c,d['loi_sociale_val'],322,682)
+        if d.get('cheques_repas'): txt(c,'X',133,709,12)
+        if d.get('cheques_repas_val'): txt(c,d['cheques_repas_val'],322,709)
+        if d.get('voiture'): txt(c,'X',133,737,12)
+        if d.get('voiture_val'): txt(c,d['voiture_val'],325,736)
+        if d.get('autre'): txt(c,'X',134,765,12)
+        if d.get('autre_val'): txt(c,d['autre_val'],325,763)
+        if d.get('date_signature'): txt(c,d['date_signature'],139,808)
+        c.save()
+        return send_file(merge(TEMPLATES['independant'],p,1),mimetype='application/pdf',as_attachment=True,download_name=f"independant_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+    except Exception as e: return jsonify({"error":str(e)}),500
+
+@app.route('/fill-travailleur', methods=['POST'])
+def fill_travailleur():
+    d=request.get_json()
+    if not d: return jsonify({"error":"No data"}),400
+    try:
+        p,c=newcan()
+        if d.get('contrat_email'): txt(c,'X',296,135,12)
+        if d.get('contrat_fax'): txt(c,'X',364,135,12)
+        if d.get('contrat_poste'): txt(c,'X',415,134,12)
+        if d.get('contrat_main'): txt(c,'X',477,136,12)
+        if d.get('nom_employeur'): txt(c,d['nom_employeur'],384,203)
+        cv=d.get('civilite','')
+        if cv=='Mr': txt(c,'X',141,259,12)
+        elif cv=='Mme': txt(c,'X',298,260,12)
+        elif cv=='Melle': txt(c,'X',459,260,12)
+        if d.get('nom_prenom'): txt(c,d['nom_prenom'],383,286)
+        if d.get('adresse_1'): txt(c,d['adresse_1'],378,313)
+        if d.get('adresse_2'): txt(c,d['adresse_2'],378,340)
+        if d.get('date_lieu_naissance'): txt(c,d['date_lieu_naissance'],377,366)
+        if d.get('niss'): txt(c,d['niss'],376,392)
+        if d.get('nationalite'): txt(c,d['nationalite'],378,421)
+        if d.get('carte_identite'): txt(c,'X',133,449,12)
+        if d.get('permis_travail'): txt(c,'X',133,470,12)
+        if d.get('permis_date'): txt(c,d['permis_date'],471,466)
+        et=d.get('etat_civil','')
+        if et=='Marie': txt(c,'X',283,532,12)
+        elif et=='Veuf': txt(c,'X',475,533,12)
+        elif et=='Celibataire': txt(c,'X',283,559,12)
+        elif et=='Separe': txt(c,'X',476,561,12)
+        elif et=='Divorce': txt(c,'X',283,586,12)
+        elif et=='Cohabitation': txt(c,'X',473,585,12)
+        if d.get('conjoint_charge'): txt(c,'X',90,634,12)
+        if d.get('enfants_charge'): txt(c,'X',289,635,12)
+        if d.get('autre_charge'): txt(c,'X',91,655,12)
+        if d.get('nb_enfants'): txt(c,d['nb_enfants'],604,635)
+        if d.get('nb_handicapes'): txt(c,d['nb_handicapes'],604,653)
+        if d.get('date_entree'): txt(c,d['date_entree'],223,729)
+        if d.get('date_sortie'): txt(c,d['date_sortie'],515,731)
+        ct=d.get('categorie','')
+        if ct=='Employe': txt(c,'X',260,757,12)
+        elif ct=='Ouvrier': txt(c,'X',347,758,12)
+        elif ct=='Chef': txt(c,'X',428,757,12)
+        elif ct=='Autre': txt(c,'X',562,758,12)
+        if d.get('fonction'): txt(c,d['fonction'],261,791)
+        tc=d.get('type_contrat','')
+        if tc=='CDD': txt(c,'X',283,826,12)
+        elif tc=='CDI': txt(c,'X',283,845,12)
+        elif tc=='Etudiant': txt(c,'X',284,870,12)
+        elif tc=='Remplacement': txt(c,'X',474,824,12)
+        elif tc=='Nettement defini': txt(c,'X',475,847,12)
+        rg=d.get('regime_horaire','')
+        if rg=='Temps plein': txt(c,'X',257,900,12)
+        elif rg=='Temps partiel': txt(c,'X',384,900,12)
+        c.showPage()
+        hr=d.get('horaire_type','')
+        if hr=='Fixe': txt(c,'X',258,99,12)
+        elif hr=='Variable': txt(c,'X',385,99,12)
+        if d.get('heures_semaine'): txt(c,d['heures_semaine'],291,127)
+        sch=[('lundi',202,188,276,355,418,514,584),('mardi',200,205,271,360,412,512,576),('mercredi',200,223,275,362,429,512,577),('jeudi',200,241,271,356,421,513,581),('vendredi',200,258,273,357,421,513,583),('samedi',208,275,276,355,419,512,579),('dimanche',207,294,270,354,424,513,582)]
+        for day,x1,y,x2,x3,x4,x5,x6 in sch:
+            if d.get(f'{day}_matin_de'): txt(c,d[f'{day}_matin_de'],x1,y,9)
+            if d.get(f'{day}_matin_a'): txt(c,d[f'{day}_matin_a'],x2,y,9)
+            if d.get(f'{day}_pause_de'): txt(c,d[f'{day}_pause_de'],x3,y,9)
+            if d.get(f'{day}_pause_a'): txt(c,d[f'{day}_pause_a'],x4,y,9)
+            if d.get(f'{day}_apres_de'): txt(c,d[f'{day}_apres_de'],x5,y,9)
+            if d.get(f'{day}_apres_a'): txt(c,d[f'{day}_apres_a'],x6,y,9)
+        if d.get('remuneration'): txt(c,d['remuneration'],335,319)
+        if d.get('compte_bancaire'): txt(c,d['compte_bancaire'],337,347)
+        if d.get('avantage_nourriture'): txt(c,'X',134,401,12)
+        if d.get('avantage_vetements'): txt(c,'X',133,431,12)
+        if d.get('avantage_voiture'): txt(c,'X',134,455,12)
+        if d.get('avantage_gsm'): txt(c,'X',134,484,12)
+        if d.get('avantage_autre'): txt(c,'X',134,512,12)
+        if d.get('prime_nuit'): txt(c,'X',176,547,12)
+        if d.get('prime_weekend'): txt(c,'X',240,546,12)
+        if d.get('prime_froid'): txt(c,'X',345,547,12)
+        if d.get('prime_autre'): txt(c,d['prime_autre'],418,547)
+        if d.get('transport_train'): txt(c,'X',95,601,12)
+        if d.get('transport_tram'): txt(c,'X',167,602,12)
+        if d.get('transport_metro'): txt(c,'X',235,602,12)
+        if d.get('transport_bus'): txt(c,'X',313,602,12)
+        if d.get('transport_voiture'): txt(c,'X',374,602,12)
+        if d.get('transport_pieds'): txt(c,'X',462,601,12)
+        if d.get('transport_velo'): txt(c,'X',540,600,12)
+        if d.get('km'): txt(c,d['km'],331,627)
+        if d.get('chomage_depuis'): txt(c,d['chomage_depuis'],375,657)
+        if d.get('c131'): txt(c,'X',135,686,12)
+        if d.get('carte_activa'): txt(c,'X',136,716,12)
+        if d.get('carte_recue'): txt(c,'X',312,711,12)
+        if d.get('faire_demande'): txt(c,'X',291,743,12)
+        if d.get('cpas_depuis'): txt(c,d['cpas_depuis'],355,768)
+        if d.get('date_signature'): txt(c,d['date_signature'],139,813)
+        c.save()
+        return send_file(merge(TEMPLATES['travailleur'],p,2),mimetype='application/pdf',as_attachment=True,download_name=f"travailleur_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+    except Exception as e: return jsonify({"error":str(e)}),500
+
+@app.route('/fill-offre1', methods=['POST'])
+def fill_offre1():
+    d=request.get_json()
+    if not d: return jsonify({"error":"No data"}),400
+    try:
+        p,c=newcan()
+        if d.get('nom_societe'): txt(c,d['nom_societe'],223,470)
+        if d.get('adresse_1'): txt(c,d['adresse_1'],218,496)
+        if d.get('adresse_2'): txt(c,d['adresse_2'],217,526)
+        if d.get('num_tva'): txt(c,d['num_tva'],217,551)
+        if d.get('represente_par'): txt(c,d['represente_par'],217,577)
+        c.save()
+        return send_file(merge(TEMPLATES['offre1'],p,1),mimetype='application/pdf',as_attachment=True,download_name=f"offre1_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+    except Exception as e: return jsonify({"error":str(e)}),500
+
+@app.route('/fill-offre2', methods=['POST'])
+def fill_offre2():
+    d=request.get_json()
+    if not d: return jsonify({"error":"No data"}),400
+    try:
+        p,c=newcan()
+        if d.get('nom_societe'): txt(c,d['nom_societe'],210,222)
+        if d.get('adresse_1'): txt(c,d['adresse_1'],207,238)
+        if d.get('adresse_2'): txt(c,d['adresse_2'],202,258)
+        if d.get('num_tva'): txt(c,d['num_tva'],202,273)
+        if d.get('represente_par'): txt(c,d['represente_par'],199,291)
+        if d.get('date_entree_jour'): txt(c,d['date_entree_jour'],328,585)
+        if d.get('date_entree_mois'): txt(c,d['date_entree_mois'],370,585)
+        if d.get('date_entree_annee'): txt(c,d['date_entree_annee'],423,587)
+        if d.get('date_fait'): txt(c,d['date_fait'],189,640)
+        c.save()
+        return send_file(merge(TEMPLATES['offre2'],p,1),mimetype='application/pdf',as_attachment=True,download_name=f"offre2_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+    except Exception as e: return jsonify({"error":str(e)}),500
+
+@app.route('/fill-offre3', methods=['POST'])
+def fill_offre3():
+    d=request.get_json()
+    if not d: return jsonify({"error":"No data"}),400
+    try:
+        p,c=newcan()
+        if d.get('nom_soussigne'): txt(c,d['nom_soussigne'],257,183)
+        if d.get('niss'): txt(c,d['niss'],255,200)
+        if d.get('domicile_1'): txt(c,d['domicile_1'],255,214)
+        if d.get('domicile_2'): txt(c,d['domicile_2'],255,228)
+        if d.get('qualite'): txt(c,d['qualite'],256,246)
+        if d.get('societe'): txt(c,d['societe'],253,263)
+        if d.get('adresse_1'): txt(c,d['adresse_1'],252,280)
+        if d.get('adresse_2'): txt(c,d['adresse_2'],252,295)
+        if d.get('num_tva'): txt(c,d['num_tva'],251,311)
+        if d.get('date_signature'): txt(c,d['date_signature'],205,801)
+        c.save()
+        return send_file(merge(TEMPLATES['offre3'],p,1),mimetype='application/pdf',as_attachment=True,download_name=f"offre3_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+    except Exception as e: return jsonify({"error":str(e)}),500
+
+@app.route('/fill-offre4', methods=['POST'])
+def fill_offre4():
+    d=request.get_json()
+    if not d: return jsonify({"error":"No data"}),400
+    try:
+        p,c=newcan()
+        if d.get('nom_soussigne'): txt(c,d['nom_soussigne'],246,185)
+        if d.get('niss'): txt(c,d['niss'],245,200)
+        if d.get('domicile_1'): txt(c,d['domicile_1'],246,216)
+        if d.get('domicile_2'): txt(c,d['domicile_2'],245,234)
+        if d.get('qualite'): txt(c,d['qualite'],244,249)
+        if d.get('societe'): txt(c,d['societe'],244,265)
+        if d.get('adresse_1'): txt(c,d['adresse_1'],244,282)
+        if d.get('adresse_2'): txt(c,d['adresse_2'],243,297)
+        if d.get('num_tva'): txt(c,d['num_tva'],243,312)
+        if d.get('date_signature'): txt(c,d['date_signature'],203,782)
+        c.save()
+        return send_file(merge(TEMPLATES['offre4'],p,1),mimetype='application/pdf',as_attachment=True,download_name=f"offre4_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+    except Exception as e: return jsonify({"error":str(e)}),500
+
+@app.route('/fill-procuration', methods=['POST'])
+def fill_procuration():
+    d=request.get_json()
+    if not d: return jsonify({"error":"No data"}),400
+    try:
+        p,c=newcan()
+        if d.get('num_entreprise'): txt(c,d['num_entreprise'],215,115)
+        if d.get('denomination'): txt(c,d['denomination'],184,135)
+        if d.get('rue'): txt(c,d['rue'],119,152)
+        if d.get('numero'): txt(c,d['numero'],440,153)
+        if d.get('boite'): txt(c,d['boite'],571,153)
+        if d.get('code_postal'): txt(c,d['code_postal'],145,174)
+        if d.get('commune'): txt(c,d['commune'],286,173)
+        if d.get('pays'): txt(c,d['pays'],482,174)
+        if d.get('num_onss'): txt(c,d['num_onss'],476,118)
+        if d.get('num_affiliation_employeur'): txt(c,d['num_affiliation_employeur'],274,268)
+        if d.get('trimestre_debut'): txt(c,d['trimestre_debut'],202,518)
+        if d.get('trimestre_fin'): txt(c,d['trimestre_fin'],462,520)
+        if d.get('date_signature'): txt(c,d['date_signature'],186,690)
+        if d.get('niss_mandant'): txt(c,d['niss_mandant'],241,706)
+        if d.get('nom_mandant'): txt(c,d['nom_mandant'],171,726)
+        c.save()
+        return send_file(merge(TEMPLATES['procuration'],p,1),mimetype='application/pdf',as_attachment=True,download_name=f"procuration_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+    except Exception as e: return jsonify({"error":str(e)}),500
+
+@app.route('/fill-dispense', methods=['POST'])
+def fill_dispense():
+    d=request.get_json()
+    if not d: return jsonify({"error":"No data"}),400
+    try:
+        p,c=newcan()
+        if d.get('nom_soussigne'): txt(c,d['nom_soussigne'],334,188)
+        if d.get('qualite'): txt(c,d['qualite'],255,206)
+        if d.get('societe'): txt(c,d['societe'],463,208)
+        if d.get('num_entreprise'): txt(c,d['num_entreprise'],514,222)
+        if d.get('depuis_date'): txt(c,d['depuis_date'],187,238)
+        if d.get('checkbox_10pct'): txt(c,'X',91,307,12)
+        c.showPage()
+        if d.get('checkbox_20pct'): txt(c,'X',90,312,12)
+        if d.get('etabli_lieu'): txt(c,d['etabli_lieu'],176,761)
+        if d.get('etabli_date'): txt(c,d['etabli_date'],329,761)
+        c.save()
+        return send_file(merge(TEMPLATES['dispense'],p,2),mimetype='application/pdf',as_attachment=True,download_name=f"dispense_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+    except Exception as e: return jsonify({"error":str(e)}),500
+
+@app.route('/fill-mensura', methods=['POST'])
+def fill_mensura():
+    d=request.get_json()
+    if not d: return jsonify({"error":"No data"}),400
+    try:
+        p,c=newcan()
+        if d.get('nom_entreprise'): txt(c,d['nom_entreprise'],144,236)
+        if d.get('siege_social_1'): txt(c,d['siege_social_1'],148,289)
+        if d.get('siege_social_2'): txt(c,d['siege_social_2'],147,302)
+        if d.get('siege_exploitation'): txt(c,d['siege_exploitation'],167,344)
+        if d.get('telephone'): txt(c,d['telephone'],189,371)
+        if d.get('gsm'): txt(c,d['gsm'],439,368)
+        if d.get('email'): txt(c,d['email'],184,410)
+        if d.get('tva_bce'): txt(c,d['tva_bce'],210,438)
+        if d.get('num_onss'): txt(c,d['num_onss'],476,437)
+        if d.get('compte_bancaire'): txt(c,d['compte_bancaire'],233,467)
+        if d.get('code_nace'): txt(c,d['code_nace'],342,519)
+        if d.get('nb_travailleurs'): txt(c,d['nb_travailleurs'],617,517)
+        c.showPage();c.showPage();c.showPage()
+        if d.get('date_cours'): txt(c,d['date_cours'],322,125)
+        if d.get('fait_lieu'): txt(c,d['fait_lieu'],181,194)
+        if d.get('fait_date'): txt(c,d['fait_date'],326,197)
+        if d.get('nom_delegue'): txt(c,d['nom_delegue'],143,442)
+        c.save()
+        return send_file(merge(TEMPLATES['mensura'],p,4),mimetype='application/pdf',as_attachment=True,download_name=f"mensura_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+    except Exception as e: return jsonify({"error":str(e)}),500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
