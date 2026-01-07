@@ -37,7 +37,6 @@ def fill_pdf_with_data(data):
     packet = io.BytesIO()
     can = canvas.Canvas(packet, pagesize=(595, 842))
     
-    # Scale factors for 707x1000 image
     SCALE_X = 595 / 707
     SCALE_Y = 842 / 1000
     
@@ -53,7 +52,7 @@ def fill_pdf_with_data(data):
     
     ALIGN_X = 440
     
-    # Page 1
+    # PAGE 1 - Keep exact Y positions from working version
     if data.get('recu_par'):
         add_text(data['recu_par'], ALIGN_X, 197)
     
@@ -119,13 +118,15 @@ def fill_pdf_with_data(data):
     
     can.showPage()
     
-    # Page 2
+    # PAGE 2 - KEEP SAME Y POSITIONS FROM WORKING VERSION
     PAGE2_ALIGN_X = 440
     
+    # Régime horaire - SAME Y as working version
     if data.get('regime_horaire'):
         add_text(data['regime_horaire'], 255, 146)
     
-    # Schedule table
+    # Schedule table - KEEP EXACT Y VALUES
+    # Lundi - Y=224
     if data.get('lundi_matin_de'):
         add_text(data['lundi_matin_de'], 200, 224, 9)
     if data.get('lundi_matin_a'):
@@ -139,6 +140,7 @@ def fill_pdf_with_data(data):
     if data.get('lundi_apres_a'):
         add_text(data['lundi_apres_a'], 627, 224, 9)
     
+    # Mardi - Y=243
     if data.get('mardi_matin_de'):
         add_text(data['mardi_matin_de'], 200, 243, 9)
     if data.get('mardi_matin_a'):
@@ -152,6 +154,7 @@ def fill_pdf_with_data(data):
     if data.get('mardi_apres_a'):
         add_text(data['mardi_apres_a'], 627, 243, 9)
     
+    # Mercredi - Y=262
     if data.get('mercredi_matin_de'):
         add_text(data['mercredi_matin_de'], 200, 262, 9)
     if data.get('mercredi_matin_a'):
@@ -165,6 +168,7 @@ def fill_pdf_with_data(data):
     if data.get('mercredi_apres_a'):
         add_text(data['mercredi_apres_a'], 627, 262, 9)
     
+    # Jeudi - Y=281
     if data.get('jeudi_matin_de'):
         add_text(data['jeudi_matin_de'], 200, 281, 9)
     if data.get('jeudi_matin_a'):
@@ -178,6 +182,7 @@ def fill_pdf_with_data(data):
     if data.get('jeudi_apres_a'):
         add_text(data['jeudi_apres_a'], 627, 281, 9)
     
+    # Vendredi - Y=300
     if data.get('vendredi_matin_de'):
         add_text(data['vendredi_matin_de'], 200, 300, 9)
     if data.get('vendredi_matin_a'):
@@ -191,6 +196,7 @@ def fill_pdf_with_data(data):
     if data.get('vendredi_apres_a'):
         add_text(data['vendredi_apres_a'], 627, 300, 9)
     
+    # Samedi - Y=319
     if data.get('samedi_matin_de'):
         add_text(data['samedi_matin_de'], 200, 319, 9)
     if data.get('samedi_matin_a'):
@@ -204,6 +210,7 @@ def fill_pdf_with_data(data):
     if data.get('samedi_apres_a'):
         add_text(data['samedi_apres_a'], 627, 319, 9)
     
+    # Dimanche - Y=338
     if data.get('dimanche_matin_de'):
         add_text(data['dimanche_matin_de'], 200, 338, 9)
     if data.get('dimanche_matin_a'):
@@ -217,44 +224,49 @@ def fill_pdf_with_data(data):
     if data.get('dimanche_apres_a'):
         add_text(data['dimanche_apres_a'], 627, 338, 9)
     
+    # Bottom fields - KEEP SAME Y AS WORKING VERSION
     if data.get('cameras'):
-        add_text(data['cameras'], PAGE2_ALIGN_X, 365)
+        add_text(data['cameras'], PAGE2_ALIGN_X, 365)  # SAME Y
+    
     if data.get('trousse_secours'):
-        add_text(data['trousse_secours'], PAGE2_ALIGN_X, 415)
+        add_text(data['trousse_secours'], PAGE2_ALIGN_X, 415)  # SAME Y
     
     vetements_fourniture = data.get('vetements_fourniture', '')
     if vetements_fourniture == 'Oui':
-        add_text('X', 442, 448, 12)
+        add_text('X', 442, 448, 12)  # SAME Y
     elif vetements_fourniture == 'Non':
-        add_text('X', 479, 448, 12)
+        add_text('X', 479, 448, 12)  # SAME Y
     
     vetements_entretien = data.get('vetements_entretien', '')
     if vetements_entretien == 'Oui':
-        add_text('X', 442, 481, 12)
+        add_text('X', 442, 481, 12)  # SAME Y
     elif vetements_entretien == 'Non':
-        add_text('X', 479, 481, 12)
+        add_text('X', 479, 481, 12)  # SAME Y
     
     if data.get('primes'):
-        add_text(data['primes'], PAGE2_ALIGN_X, 514)
+        add_text(data['primes'], PAGE2_ALIGN_X, 514)  # SAME Y
+    
     if data.get('secretariat_actuel'):
-        add_text(data['secretariat_actuel'], PAGE2_ALIGN_X, 547)
+        add_text(data['secretariat_actuel'], PAGE2_ALIGN_X, 547)  # SAME Y
+    
     if data.get('nom_comptable'):
-        add_text(data['nom_comptable'], PAGE2_ALIGN_X, 580)
+        add_text(data['nom_comptable'], PAGE2_ALIGN_X, 580)  # SAME Y
+    
     if data.get('coord_comptable'):
-        add_text(data['coord_comptable'], PAGE2_ALIGN_X, 613)
+        add_text(data['coord_comptable'], PAGE2_ALIGN_X, 613)  # SAME Y
     
     origine = data.get('origine', '')
     if origine == 'Internet':
-        add_text('X', 145, 662, 12)
+        add_text('X', 145, 662, 12)  # SAME Y
     elif origine == 'Comptable':
-        add_text('X', 341, 662, 12)
+        add_text('X', 341, 662, 12)  # SAME Y
     elif origine == 'Client':
-        add_text('X', 145, 696, 12)
+        add_text('X', 145, 696, 12)  # SAME Y
     elif origine == 'Autre':
-        add_text('X', 341, 696, 12)
+        add_text('X', 341, 696, 12)  # SAME Y
     
     if data.get('date_signature'):
-        add_text(data['date_signature'], 160, 846)
+        add_text(data['date_signature'], 160, 846)  # SAME Y
     
     can.save()
     
