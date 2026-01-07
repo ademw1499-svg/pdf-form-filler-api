@@ -50,11 +50,9 @@ def fill_pdf_with_data(data):
         x_pdf, y_pdf = convert_coords(x_img, y_img)
         can.drawString(x_pdf, y_pdf, str(text))
     
-    ALIGN_X = 440
-    
-    # PAGE 1
+    # PAGE 1 - EXACT COORDINATES FROM COORDINATE PICKER
     if data.get('recu_par'):
-        add_text(data['recu_par'], ALIGN_X, 197)
+        add_text(data['recu_par'], 235, 198)
     
     forme = data.get('forme_juridique', '')
     if forme == 'SRL':
@@ -69,53 +67,53 @@ def fill_pdf_with_data(data):
         add_text('X', 415, 235, 12)
     
     if data.get('nom_societe'):
-        add_text(data['nom_societe'], ALIGN_X, 275)
+        add_text(data['nom_societe'], 469, 277)
     if data.get('nom_prenom_gerant'):
-        add_text(data['nom_prenom_gerant'], ALIGN_X, 308)
+        add_text(data['nom_prenom_gerant'], 469, 310)
     if data.get('niss_gerant'):
-        add_text(data['niss_gerant'], ALIGN_X, 340)
+        add_text(data['niss_gerant'], 468, 344)
     if data.get('adresse_siege_social_1'):
-        add_text(data['adresse_siege_social_1'], ALIGN_X, 373)
+        add_text(data['adresse_siege_social_1'], 466, 375)
     if data.get('adresse_siege_social_2'):
-        add_text(data['adresse_siege_social_2'], ALIGN_X, 390)
+        add_text(data['adresse_siege_social_2'], 465, 409)
     if data.get('adresse_exploitation_1'):
-        add_text(data['adresse_exploitation_1'], ALIGN_X, 423)
+        add_text(data['adresse_exploitation_1'], 466, 443)
     if data.get('adresse_exploitation_2'):
-        add_text(data['adresse_exploitation_2'], ALIGN_X, 440)
+        add_text(data['adresse_exploitation_2'], 464, 478)
     if data.get('telephone_gsm'):
-        add_text(data['telephone_gsm'], ALIGN_X, 505)
+        add_text(data['telephone_gsm'], 461, 507)
     if data.get('email'):
-        add_text(data['email'], ALIGN_X, 538)
+        add_text(data['email'], 462, 539)
     if data.get('num_entreprise'):
-        add_text(data['num_entreprise'], ALIGN_X, 571)
+        add_text(data['num_entreprise'], 462, 572)
     if data.get('num_onss'):
-        add_text(data['num_onss'], ALIGN_X, 604)
+        add_text(data['num_onss'], 462, 604)
     if data.get('assurance_loi'):
-        add_text(data['assurance_loi'], ALIGN_X, 637)
+        add_text(data['assurance_loi'], 464, 638)
     if data.get('seppt'):
-        add_text(data['seppt'], ALIGN_X, 670)
+        add_text(data['seppt'], 464, 669)
     if data.get('secteur_activite'):
-        add_text(data['secteur_activite'], ALIGN_X, 703)
+        add_text(data['secteur_activite'], 464, 703)
     
-    # FIXED Y COORDINATES BELOW
+    # Checkboxes and bottom fields - EXACT COORDINATES
     reduction = data.get('reduction_premier', '')
     if reduction == 'Oui':
-        add_text('X', 75, 755, 12)
+        add_text('X', 96, 768, 12)
     elif reduction == 'Non':
-        add_text('X', 112, 755, 12)
+        add_text('X', 133, 768, 12)
     
     if data.get('commission_paritaire'):
-        add_text(data['commission_paritaire'], 295, 788)
+        add_text(data['commission_paritaire'], 462, 802)
     if data.get('indice_onss'):
-        add_text(data['indice_onss'], 220, 821)
+        add_text(data['indice_onss'], 463, 834)
     if data.get('code_nace'):
-        add_text(data['code_nace'], 210, 854)
+        add_text(data['code_nace'], 461, 868)
     
     salaire = data.get('salaire_garanti', '')
     if salaire == 'OUI':
-        add_text('X', 640, 900, 12)
+        add_text('X', 581, 899, 12)
     elif salaire == 'NON':
-        add_text('X', 677, 900, 12)
+        add_text('X', 618, 899, 12)
     
     can.showPage()
     
