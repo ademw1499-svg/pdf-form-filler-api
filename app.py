@@ -18,10 +18,10 @@ TEMPLATES = {
     'dispense': 'Dispense_partielle_de_versement_du_precompte_professionnel.pdf',
     'mensura': 'FOR140106_FR.pdf',
     'procuration': 'PROCURATION.pdf',
-    'offre1': 'offre de collab 1.pdf',
-    'offre2': 'offre de collab 2.pdf',
-    'offre3': 'offre de collab 3.pdf',
-    'offre4': 'offre de collab 4.pdf',
+    'offre1': 'offre_de_collab_1.pdf',
+    'offre2': 'offre_de_collab_2.pdf',
+    'offre3': 'offre_de_collab_3.pdf',
+    'offre4': 'offre_de_collab_4.pdf',
 }
 
 SCALE_X, SCALE_Y = 595/707, 842/1000
