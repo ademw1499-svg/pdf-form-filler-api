@@ -99,16 +99,16 @@ def fill_pdf_with_data(data):
     
     reduction = data.get('reduction_premier', '')
     if reduction == 'Oui':
-        add_text('X', 75, 768, 12)
+        add_text('X', 75, 755, 12)
     elif reduction == 'Non':
-        add_text('X', 112, 768, 12)
+        add_text('X', 112, 755, 12)
     
     if data.get('commission_paritaire'):
-        add_text(data['commission_paritaire'], 295, 803)
+        add_text(data['commission_paritaire'], 295, 788)
     if data.get('indice_onss'):
-        add_text(data['indice_onss'], 220, 836)
+        add_text(data['indice_onss'], 220, 821)
     if data.get('code_nace'):
-        add_text(data['code_nace'], 210, 869)
+        add_text(data['code_nace'], 210, 854)
     
     salaire = data.get('salaire_garanti', '')
     if salaire == 'OUI':
