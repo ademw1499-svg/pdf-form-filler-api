@@ -254,6 +254,8 @@ def fill_pdf_with_data(data):
     if data.get('date_signature'):
         add_text(data['date_signature'], 160, 846)
     
+    # Ensure page 2 exists by adding at least a space
+    can.drawString(0, 0, " ")
     can.save()
     
     packet.seek(0)
@@ -261,12 +263,16 @@ def fill_pdf_with_data(data):
     
     writer = PdfWriter()
     
+    # Page 1
     page1 = reader.pages[0]
-    page1.merge_page(overlay.pages[0])
+    if len(overlay.pages) > 0:
+        page1.merge_page(overlay.pages[0])
     writer.add_page(page1)
     
+    # Page 2
     page2 = reader.pages[1]
-    page2.merge_page(overlay.pages[1])
+    if len(overlay.pages) > 1:
+        page2.merge_page(overlay.pages[1])
     writer.add_page(page2)
     
     output = io.BytesIO()
