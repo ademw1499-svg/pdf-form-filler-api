@@ -117,142 +117,148 @@ def fill_pdf_with_data(data):
     
     can.showPage()
     
-    # PAGE 2
-    PAGE2_ALIGN_X = 440
-    
+    # PAGE 2 - EXACT COORDINATES FROM COORDINATE PICKER
     if data.get('regime_horaire'):
-        add_text(data['regime_horaire'], 255, 146)
+        add_text(data['regime_horaire'], 357, 148)
     
-    # Schedule
+    # Schedule table - Row spacing is ~19-20 pixels
+    # Lundi Y=228
     if data.get('lundi_matin_de'):
-        add_text(data['lundi_matin_de'], 200, 224, 9)
+        add_text(data['lundi_matin_de'], 213, 228, 9)
     if data.get('lundi_matin_a'):
-        add_text(data['lundi_matin_a'], 255, 224, 9)
+        add_text(data['lundi_matin_a'], 276, 228, 9)
     if data.get('lundi_pause_de'):
-        add_text(data['lundi_pause_de'], 372, 224, 9)
+        add_text(data['lundi_pause_de'], 363, 228, 9)
     if data.get('lundi_pause_a'):
-        add_text(data['lundi_pause_a'], 427, 224, 9)
+        add_text(data['lundi_pause_a'], 423, 228, 9)
     if data.get('lundi_apres_de'):
-        add_text(data['lundi_apres_de'], 572, 224, 9)
+        add_text(data['lundi_apres_de'], 522, 227, 9)
     if data.get('lundi_apres_a'):
-        add_text(data['lundi_apres_a'], 627, 224, 9)
+        add_text(data['lundi_apres_a'], 585, 228, 9)
     
+    # Mardi Y=247
     if data.get('mardi_matin_de'):
-        add_text(data['mardi_matin_de'], 200, 243, 9)
+        add_text(data['mardi_matin_de'], 211, 247, 9)
     if data.get('mardi_matin_a'):
-        add_text(data['mardi_matin_a'], 255, 243, 9)
+        add_text(data['mardi_matin_a'], 276, 247, 9)
     if data.get('mardi_pause_de'):
-        add_text(data['mardi_pause_de'], 372, 243, 9)
+        add_text(data['mardi_pause_de'], 363, 247, 9)
     if data.get('mardi_pause_a'):
-        add_text(data['mardi_pause_a'], 427, 243, 9)
+        add_text(data['mardi_pause_a'], 423, 247, 9)
     if data.get('mardi_apres_de'):
-        add_text(data['mardi_apres_de'], 572, 243, 9)
+        add_text(data['mardi_apres_de'], 522, 247, 9)
     if data.get('mardi_apres_a'):
-        add_text(data['mardi_apres_a'], 627, 243, 9)
+        add_text(data['mardi_apres_a'], 585, 247, 9)
     
+    # Mercredi Y=266
     if data.get('mercredi_matin_de'):
-        add_text(data['mercredi_matin_de'], 200, 262, 9)
+        add_text(data['mercredi_matin_de'], 211, 266, 9)
     if data.get('mercredi_matin_a'):
-        add_text(data['mercredi_matin_a'], 255, 262, 9)
+        add_text(data['mercredi_matin_a'], 276, 266, 9)
     if data.get('mercredi_pause_de'):
-        add_text(data['mercredi_pause_de'], 372, 262, 9)
+        add_text(data['mercredi_pause_de'], 363, 266, 9)
     if data.get('mercredi_pause_a'):
-        add_text(data['mercredi_pause_a'], 427, 262, 9)
+        add_text(data['mercredi_pause_a'], 423, 266, 9)
     if data.get('mercredi_apres_de'):
-        add_text(data['mercredi_apres_de'], 572, 262, 9)
+        add_text(data['mercredi_apres_de'], 522, 266, 9)
     if data.get('mercredi_apres_a'):
-        add_text(data['mercredi_apres_a'], 627, 262, 9)
+        add_text(data['mercredi_apres_a'], 585, 266, 9)
     
+    # Jeudi Y=285
     if data.get('jeudi_matin_de'):
-        add_text(data['jeudi_matin_de'], 200, 281, 9)
+        add_text(data['jeudi_matin_de'], 211, 285, 9)
     if data.get('jeudi_matin_a'):
-        add_text(data['jeudi_matin_a'], 255, 281, 9)
+        add_text(data['jeudi_matin_a'], 276, 285, 9)
     if data.get('jeudi_pause_de'):
-        add_text(data['jeudi_pause_de'], 372, 281, 9)
+        add_text(data['jeudi_pause_de'], 363, 285, 9)
     if data.get('jeudi_pause_a'):
-        add_text(data['jeudi_pause_a'], 427, 281, 9)
+        add_text(data['jeudi_pause_a'], 423, 285, 9)
     if data.get('jeudi_apres_de'):
-        add_text(data['jeudi_apres_de'], 572, 281, 9)
+        add_text(data['jeudi_apres_de'], 522, 285, 9)
     if data.get('jeudi_apres_a'):
-        add_text(data['jeudi_apres_a'], 627, 281, 9)
+        add_text(data['jeudi_apres_a'], 585, 285, 9)
     
+    # Vendredi Y=304
     if data.get('vendredi_matin_de'):
-        add_text(data['vendredi_matin_de'], 200, 300, 9)
+        add_text(data['vendredi_matin_de'], 211, 304, 9)
     if data.get('vendredi_matin_a'):
-        add_text(data['vendredi_matin_a'], 255, 300, 9)
+        add_text(data['vendredi_matin_a'], 276, 304, 9)
     if data.get('vendredi_pause_de'):
-        add_text(data['vendredi_pause_de'], 372, 300, 9)
+        add_text(data['vendredi_pause_de'], 363, 304, 9)
     if data.get('vendredi_pause_a'):
-        add_text(data['vendredi_pause_a'], 427, 300, 9)
+        add_text(data['vendredi_pause_a'], 423, 304, 9)
     if data.get('vendredi_apres_de'):
-        add_text(data['vendredi_apres_de'], 572, 300, 9)
+        add_text(data['vendredi_apres_de'], 522, 304, 9)
     if data.get('vendredi_apres_a'):
-        add_text(data['vendredi_apres_a'], 627, 300, 9)
+        add_text(data['vendredi_apres_a'], 585, 304, 9)
     
+    # Samedi Y=331
     if data.get('samedi_matin_de'):
-        add_text(data['samedi_matin_de'], 200, 319, 9)
+        add_text(data['samedi_matin_de'], 210, 331, 9)
     if data.get('samedi_matin_a'):
-        add_text(data['samedi_matin_a'], 255, 319, 9)
+        add_text(data['samedi_matin_a'], 276, 331, 9)
     if data.get('samedi_pause_de'):
-        add_text(data['samedi_pause_de'], 372, 319, 9)
+        add_text(data['samedi_pause_de'], 363, 331, 9)
     if data.get('samedi_pause_a'):
-        add_text(data['samedi_pause_a'], 427, 319, 9)
+        add_text(data['samedi_pause_a'], 423, 331, 9)
     if data.get('samedi_apres_de'):
-        add_text(data['samedi_apres_de'], 572, 319, 9)
+        add_text(data['samedi_apres_de'], 522, 331, 9)
     if data.get('samedi_apres_a'):
-        add_text(data['samedi_apres_a'], 627, 319, 9)
+        add_text(data['samedi_apres_a'], 585, 331, 9)
     
+    # Dimanche Y=351
     if data.get('dimanche_matin_de'):
-        add_text(data['dimanche_matin_de'], 200, 338, 9)
+        add_text(data['dimanche_matin_de'], 209, 351, 9)
     if data.get('dimanche_matin_a'):
-        add_text(data['dimanche_matin_a'], 255, 338, 9)
+        add_text(data['dimanche_matin_a'], 276, 351, 9)
     if data.get('dimanche_pause_de'):
-        add_text(data['dimanche_pause_de'], 372, 338, 9)
+        add_text(data['dimanche_pause_de'], 363, 351, 9)
     if data.get('dimanche_pause_a'):
-        add_text(data['dimanche_pause_a'], 427, 338, 9)
+        add_text(data['dimanche_pause_a'], 423, 351, 9)
     if data.get('dimanche_apres_de'):
-        add_text(data['dimanche_apres_de'], 572, 338, 9)
+        add_text(data['dimanche_apres_de'], 522, 351, 9)
     if data.get('dimanche_apres_a'):
-        add_text(data['dimanche_apres_a'], 627, 338, 9)
+        add_text(data['dimanche_apres_a'], 585, 351, 9)
     
+    # Other Page 2 fields - EXACT COORDINATES
     if data.get('cameras'):
-        add_text(data['cameras'], PAGE2_ALIGN_X, 365)
+        add_text(data['cameras'], 427, 387)
     if data.get('trousse_secours'):
-        add_text(data['trousse_secours'], PAGE2_ALIGN_X, 415)
+        add_text(data['trousse_secours'], 400, 453)
     
     vetements_fourniture = data.get('vetements_fourniture', '')
     if vetements_fourniture == 'Oui':
-        add_text('X', 442, 448, 12)
+        add_text('X', 348, 486, 12)
     elif vetements_fourniture == 'Non':
-        add_text('X', 479, 448, 12)
+        add_text('X', 385, 485, 12)
     
     vetements_entretien = data.get('vetements_entretien', '')
     if vetements_entretien == 'Oui':
-        add_text('X', 442, 481, 12)
+        add_text('X', 347, 518, 12)
     elif vetements_entretien == 'Non':
-        add_text('X', 479, 481, 12)
+        add_text('X', 388, 518, 12)
     
     if data.get('primes'):
-        add_text(data['primes'], PAGE2_ALIGN_X, 514)
+        add_text(data['primes'], 394, 552)
     if data.get('secretariat_actuel'):
-        add_text(data['secretariat_actuel'], PAGE2_ALIGN_X, 547)
+        add_text(data['secretariat_actuel'], 394, 583)
     if data.get('nom_comptable'):
-        add_text(data['nom_comptable'], PAGE2_ALIGN_X, 580)
+        add_text(data['nom_comptable'], 390, 617)
     if data.get('coord_comptable'):
-        add_text(data['coord_comptable'], PAGE2_ALIGN_X, 613)
+        add_text(data['coord_comptable'], 390, 648)
     
     origine = data.get('origine', '')
     if origine == 'Internet':
-        add_text('X', 145, 662, 12)
+        add_text('X', 173, 683, 12)
     elif origine == 'Comptable':
-        add_text('X', 341, 662, 12)
+        add_text('X', 342, 683, 12)
     elif origine == 'Client':
-        add_text('X', 145, 696, 12)
+        add_text('X', 174, 716, 12)
     elif origine == 'Autre':
-        add_text('X', 341, 696, 12)
+        add_text('X', 341, 716, 12)
     
     if data.get('date_signature'):
-        add_text(data['date_signature'], 160, 846)
+        add_text(data['date_signature'], 177, 843)
     
     # Ensure page 2 exists by adding at least a space
     can.drawString(0, 0, " ")
