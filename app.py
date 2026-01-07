@@ -1,4 +1,3 @@
-# Updated Jan 7 2026
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from pypdf import PdfReader, PdfWriter
@@ -142,9 +141,9 @@ def fill_employer_form_data(data):
         x_pdf, y_pdf = convert_coords(x_img, y_img)
         can.drawString(x_pdf, y_pdf, str(text))
     
-    # [KEEP ALL EXISTING EMPLOYER FORM CODE - IT WORKS PERFECTLY]
+    # PAGE 1 - COMPLETE with ALL fields from Day 1
     if data.get('recu_par'):
-        add_text(data['recu_par'], ALIGN_X, 197)
+        add_text(data['recu_par'], 185, 197)
     
     forme = data.get('forme_juridique', '')
     if forme == 'SRL':
@@ -159,27 +158,235 @@ def fill_employer_form_data(data):
         add_text('X', 415, 235, 12)
     
     if data.get('nom_societe'):
-        add_text(data['nom_societe'], ALIGN_X, 275)
+        add_text(data['nom_societe'], 300, 275)
     if data.get('nom_prenom_gerant'):
-        add_text(data['nom_prenom_gerant'], ALIGN_X, 308)
+        add_text(data['nom_prenom_gerant'], 335, 308)
     if data.get('niss_gerant'):
-        add_text(data['niss_gerant'], ALIGN_X, 340)
+        add_text(data['niss_gerant'], 240, 340)
     if data.get('adresse_siege_social_1'):
-        add_text(data['adresse_siege_social_1'], ALIGN_X, 373)
+        add_text(data['adresse_siege_social_1'], 325, 373)
     if data.get('adresse_siege_social_2'):
-        add_text(data['adresse_siege_social_2'], ALIGN_X, 390)
+        add_text(data['adresse_siege_social_2'], 325, 390)
+    
+    # Adresse d'exploitation
+    if data.get('adresse_exploitation_1'):
+        add_text(data['adresse_exploitation_1'], 325, 423)
+    if data.get('adresse_exploitation_2'):
+        add_text(data['adresse_exploitation_2'], 325, 440)
+    
     if data.get('telephone_gsm'):
-        add_text(data['telephone_gsm'], ALIGN_X, 505)
+        add_text(data['telephone_gsm'], 260, 505)
     if data.get('email'):
-        add_text(data['email'], ALIGN_X, 538)
+        add_text(data['email'], 245, 538)
     if data.get('num_entreprise'):
-        add_text(data['num_entreprise'], ALIGN_X, 571)
+        add_text(data['num_entreprise'], 280, 571)
     if data.get('num_onss'):
-        add_text(data['num_onss'], ALIGN_X, 604)
+        add_text(data['num_onss'], 240, 604)
+    
+    # Assurance loi
+    if data.get('assurance_loi'):
+        add_text(data['assurance_loi'], 360, 637)
+    
+    # SEPPT
+    if data.get('seppt'):
+        add_text(data['seppt'], 180, 670)
+    
+    # Secteur d'activité
+    if data.get('secteur_activite'):
+        add_text(data['secteur_activite'], 265, 703)
+    
+    # Réduction premier engagement
+    reduction = data.get('reduction_premier', '')
+    if reduction == 'Oui':
+        add_text('X', 75, 768, 12)
+    elif reduction == 'Non':
+        add_text('X', 112, 768, 12)
+    elif reduction == 'Enquete':
+        add_text('X', 157, 768, 12)
+    
+    # Commission paritaire
+    if data.get('commission_paritaire'):
+        add_text(data['commission_paritaire'], 295, 803)
+    
+    # Indice ONSS
+    if data.get('indice_onss'):
+        add_text(data['indice_onss'], 220, 836)
+    
+    # Code Nace
+    if data.get('code_nace'):
+        add_text(data['code_nace'], 210, 869)
+    
+    # Salaire garanti
+    salaire = data.get('salaire_garanti', '')
+    if salaire == 'OUI':
+        add_text('X', 640, 900, 12)
+    elif salaire == 'NON':
+        add_text('X', 677, 900, 12)
+    
+    can.showPage()
+    
+    # PAGE 2 - COMPLETE with ALL fields
+    
+    # Régime horaire
+    if data.get('regime_horaire'):
+        add_text(data['regime_horaire'], 255, 146)
+    
+    # Weekly schedule
+    can.setFont("Helvetica", 9)
+    
+    # Monday
+    if data.get('lundi_matin_de'):
+        add_text(data['lundi_matin_de'], 200, 224, 9)
+    if data.get('lundi_matin_a'):
+        add_text(data['lundi_matin_a'], 255, 224, 9)
+    if data.get('lundi_pause_de'):
+        add_text(data['lundi_pause_de'], 372, 224, 9)
+    if data.get('lundi_pause_a'):
+        add_text(data['lundi_pause_a'], 427, 224, 9)
+    if data.get('lundi_apres_de'):
+        add_text(data['lundi_apres_de'], 572, 224, 9)
+    if data.get('lundi_apres_a'):
+        add_text(data['lundi_apres_a'], 627, 224, 9)
+    
+    # Tuesday
+    if data.get('mardi_matin_de'):
+        add_text(data['mardi_matin_de'], 200, 243, 9)
+    if data.get('mardi_matin_a'):
+        add_text(data['mardi_matin_a'], 255, 243, 9)
+    if data.get('mardi_pause_de'):
+        add_text(data['mardi_pause_de'], 372, 243, 9)
+    if data.get('mardi_pause_a'):
+        add_text(data['mardi_pause_a'], 427, 243, 9)
+    if data.get('mardi_apres_de'):
+        add_text(data['mardi_apres_de'], 572, 243, 9)
+    if data.get('mardi_apres_a'):
+        add_text(data['mardi_apres_a'], 627, 243, 9)
+    
+    # Wednesday
+    if data.get('mercredi_matin_de'):
+        add_text(data['mercredi_matin_de'], 200, 262, 9)
+    if data.get('mercredi_matin_a'):
+        add_text(data['mercredi_matin_a'], 255, 262, 9)
+    if data.get('mercredi_pause_de'):
+        add_text(data['mercredi_pause_de'], 372, 262, 9)
+    if data.get('mercredi_pause_a'):
+        add_text(data['mercredi_pause_a'], 427, 262, 9)
+    if data.get('mercredi_apres_de'):
+        add_text(data['mercredi_apres_de'], 572, 262, 9)
+    if data.get('mercredi_apres_a'):
+        add_text(data['mercredi_apres_a'], 627, 262, 9)
+    
+    # Thursday
+    if data.get('jeudi_matin_de'):
+        add_text(data['jeudi_matin_de'], 200, 281, 9)
+    if data.get('jeudi_matin_a'):
+        add_text(data['jeudi_matin_a'], 255, 281, 9)
+    if data.get('jeudi_pause_de'):
+        add_text(data['jeudi_pause_de'], 372, 281, 9)
+    if data.get('jeudi_pause_a'):
+        add_text(data['jeudi_pause_a'], 427, 281, 9)
+    if data.get('jeudi_apres_de'):
+        add_text(data['jeudi_apres_de'], 572, 281, 9)
+    if data.get('jeudi_apres_a'):
+        add_text(data['jeudi_apres_a'], 627, 281, 9)
+    
+    # Friday
+    if data.get('vendredi_matin_de'):
+        add_text(data['vendredi_matin_de'], 200, 300, 9)
+    if data.get('vendredi_matin_a'):
+        add_text(data['vendredi_matin_a'], 255, 300, 9)
+    if data.get('vendredi_pause_de'):
+        add_text(data['vendredi_pause_de'], 372, 300, 9)
+    if data.get('vendredi_pause_a'):
+        add_text(data['vendredi_pause_a'], 427, 300, 9)
+    if data.get('vendredi_apres_de'):
+        add_text(data['vendredi_apres_de'], 572, 300, 9)
+    if data.get('vendredi_apres_a'):
+        add_text(data['vendredi_apres_a'], 627, 300, 9)
+    
+    # Saturday
+    if data.get('samedi_matin_de'):
+        add_text(data['samedi_matin_de'], 200, 319, 9)
+    if data.get('samedi_matin_a'):
+        add_text(data['samedi_matin_a'], 255, 319, 9)
+    if data.get('samedi_pause_de'):
+        add_text(data['samedi_pause_de'], 372, 319, 9)
+    if data.get('samedi_pause_a'):
+        add_text(data['samedi_pause_a'], 427, 319, 9)
+    if data.get('samedi_apres_de'):
+        add_text(data['samedi_apres_de'], 572, 319, 9)
+    if data.get('samedi_apres_a'):
+        add_text(data['samedi_apres_a'], 627, 319, 9)
+    
+    # Sunday
+    if data.get('dimanche_matin_de'):
+        add_text(data['dimanche_matin_de'], 200, 338, 9)
+    if data.get('dimanche_matin_a'):
+        add_text(data['dimanche_matin_a'], 255, 338, 9)
+    if data.get('dimanche_pause_de'):
+        add_text(data['dimanche_pause_de'], 372, 338, 9)
+    if data.get('dimanche_pause_a'):
+        add_text(data['dimanche_pause_a'], 427, 338, 9)
+    if data.get('dimanche_apres_de'):
+        add_text(data['dimanche_apres_de'], 572, 338, 9)
+    if data.get('dimanche_apres_a'):
+        add_text(data['dimanche_apres_a'], 627, 338, 9)
+    
+    can.setFont("Helvetica", 10)
+    
+    # Caméras
+    if data.get('cameras'):
+        add_text(data['cameras'], 430, 365)
+    
+    # Trousse de secours
+    if data.get('trousse_secours'):
+        add_text(data['trousse_secours'], 410, 415)
+    
+    # Vêtements fourniture
+    vetements_fourniture = data.get('vetements_fourniture', '')
+    if vetements_fourniture == 'Oui':
+        add_text('X', 442, 448, 12)
+    elif vetements_fourniture == 'Non':
+        add_text('X', 479, 448, 12)
+    
+    # Vêtements entretien
+    vetements_entretien = data.get('vetements_entretien', '')
+    if vetements_entretien == 'Oui':
+        add_text('X', 442, 481, 12)
+    elif vetements_entretien == 'Non':
+        add_text('X', 479, 481, 12)
+    
+    # Primes
+    if data.get('primes'):
+        add_text(data['primes'], 380, 514)
+    
+    # Secrétariat actuel
+    if data.get('secretariat_actuel'):
+        add_text(data['secretariat_actuel'], 310, 547)
+    
+    # Nom comptable
+    if data.get('nom_comptable'):
+        add_text(data['nom_comptable'], 265, 580)
+    
+    # Coordonnées comptable
+    if data.get('coord_comptable'):
+        add_text(data['coord_comptable'], 330, 613)
+    
+    # Origine
+    origine = data.get('origine', '')
+    if origine == 'Internet':
+        add_text('X', 145, 662, 12)
+    elif origine == 'Comptable':
+        add_text('X', 341, 662, 12)
+    elif origine == 'Client':
+        add_text('X', 145, 696, 12)
+    elif origine == 'Autre':
+        add_text('X', 341, 696, 12)
+    
+    # Date signature
     if data.get('date_signature'):
         add_text(data['date_signature'], 160, 846)
     
-    can.showPage()
     can.save()
     
     packet.seek(0)
