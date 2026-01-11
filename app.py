@@ -453,11 +453,16 @@ def fill_mensura():
 
 # Signature positions for each document (page, x, y, width, height)
 # Coordinates are in points (1 point = 1/72 inch), page starts at 1
+# Includes both backend names and frontend names for compatibility
 SIGNATURE_POSITIONS = {
     'employer': {'page': 2, 'x': 372, 'y': 102, 'width': 144, 'height': 36},
+    'worker': {'page': 2, 'x': 127, 'y': 63, 'width': 144, 'height': 36},
     'travailleur': {'page': 2, 'x': 127, 'y': 63, 'width': 144, 'height': 36},
+    'independent': {'page': 1, 'x': 210, 'y': 67, 'width': 144, 'height': 36},
     'independant': {'page': 1, 'x': 210, 'y': 67, 'width': 144, 'height': 36},
+    'accident': {'page': 1, 'x': 68, 'y': 403, 'width': 144, 'height': 36},
     'att_accident': {'page': 1, 'x': 68, 'y': 403, 'width': 144, 'height': 36},
+    'seppt': {'page': 1, 'x': 70, 'y': 315, 'width': 144, 'height': 36},
     'att_seppt': {'page': 1, 'x': 70, 'y': 315, 'width': 144, 'height': 36},
     'dispense': {'page': 2, 'x': 117, 'y': 88, 'width': 144, 'height': 36},
     'procuration': {'page': 1, 'x': 88, 'y': 178, 'width': 144, 'height': 36},
@@ -471,11 +476,16 @@ SIGNATURE_POSITIONS = {
 def generate_pdf_bytes(doc_type, data):
     """Generate a PDF and return bytes"""
     # Map doc_type to the fill function
+    # Frontend sends: employer, worker, independent, seppt, accident, dispense, procuration, mensura, offre1-4
     fill_functions = {
         'employer': fill_employer_pdf,
+        'worker': fill_travailleur_pdf,
         'travailleur': fill_travailleur_pdf,
+        'independent': fill_independant_pdf,
         'independant': fill_independant_pdf,
+        'accident': fill_att_accident_pdf,
         'att_accident': fill_att_accident_pdf,
+        'seppt': fill_att_seppt_pdf,
         'att_seppt': fill_att_seppt_pdf,
         'dispense': fill_dispense_pdf,
         'procuration': fill_procuration_pdf,
@@ -882,11 +892,17 @@ def send_for_signature():
         
         # Step 2: Upload documents and add them to the signature request
         uploaded_documents = []
+        upload_errors = []
         
         for doc_type in documents:
             # Generate PDF
-            pdf_bytes = generate_pdf_bytes(doc_type, form_data)
-            if not pdf_bytes:
+            try:
+                pdf_bytes = generate_pdf_bytes(doc_type, form_data)
+                if not pdf_bytes:
+                    upload_errors.append(f"{doc_type}: PDF generation returned None")
+                    continue
+            except Exception as e:
+                upload_errors.append(f"{doc_type}: PDF generation error - {str(e)}")
                 continue
             
             # Upload document to Yousign
@@ -908,9 +924,11 @@ def send_for_signature():
                     'id': doc_data['id'],
                     'type': doc_type
                 })
+            else:
+                upload_errors.append(f"{doc_type}: Yousign upload failed - {doc_response.status_code} - {doc_response.text}")
         
         if not uploaded_documents:
-            return jsonify({"error": "No documents were uploaded"}), 500
+            return jsonify({"error": "No documents were uploaded", "details": upload_errors}), 500
         
         # Step 3: Add signer
         signer_payload = {
