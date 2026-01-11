@@ -477,23 +477,24 @@ def fill_mensura():
 # Signature positions for each document (page, x, y, width, height)
 # Coordinates are in points (1 point = 1/72 inch), page starts at 1
 # Includes both backend names and frontend names for compatibility
+# Note: Yousign requires minimum height of 37
 SIGNATURE_POSITIONS = {
-    'employer': {'page': 2, 'x': 372, 'y': 102, 'width': 144, 'height': 36},
-    'worker': {'page': 2, 'x': 127, 'y': 63, 'width': 144, 'height': 36},
-    'travailleur': {'page': 2, 'x': 127, 'y': 63, 'width': 144, 'height': 36},
-    'independent': {'page': 1, 'x': 210, 'y': 67, 'width': 144, 'height': 36},
-    'independant': {'page': 1, 'x': 210, 'y': 67, 'width': 144, 'height': 36},
-    'accident': {'page': 1, 'x': 68, 'y': 403, 'width': 144, 'height': 36},
-    'att_accident': {'page': 1, 'x': 68, 'y': 403, 'width': 144, 'height': 36},
-    'seppt': {'page': 1, 'x': 70, 'y': 315, 'width': 144, 'height': 36},
-    'att_seppt': {'page': 1, 'x': 70, 'y': 315, 'width': 144, 'height': 36},
-    'dispense': {'page': 2, 'x': 117, 'y': 88, 'width': 144, 'height': 36},
-    'procuration': {'page': 1, 'x': 88, 'y': 178, 'width': 144, 'height': 36},
+    'employer': {'page': 2, 'x': 372, 'y': 102, 'width': 144, 'height': 37},
+    'worker': {'page': 2, 'x': 127, 'y': 63, 'width': 144, 'height': 37},
+    'travailleur': {'page': 2, 'x': 127, 'y': 63, 'width': 144, 'height': 37},
+    'independent': {'page': 1, 'x': 210, 'y': 67, 'width': 144, 'height': 37},
+    'independant': {'page': 1, 'x': 210, 'y': 67, 'width': 144, 'height': 37},
+    'accident': {'page': 1, 'x': 68, 'y': 403, 'width': 144, 'height': 37},
+    'att_accident': {'page': 1, 'x': 68, 'y': 403, 'width': 144, 'height': 37},
+    'seppt': {'page': 1, 'x': 70, 'y': 315, 'width': 144, 'height': 37},
+    'att_seppt': {'page': 1, 'x': 70, 'y': 315, 'width': 144, 'height': 37},
+    'dispense': {'page': 2, 'x': 117, 'y': 88, 'width': 144, 'height': 37},
+    'procuration': {'page': 1, 'x': 88, 'y': 178, 'width': 144, 'height': 37},
     'mensura': None,  # No signature needed
     'offre1': None,   # No signature needed
-    'offre2': {'page': 1, 'x': 75, 'y': 169, 'width': 144, 'height': 36},
-    'offre3': {'page': 1, 'x': 62, 'y': 105, 'width': 144, 'height': 36},
-    'offre4': {'page': 1, 'x': 67, 'y': 124, 'width': 144, 'height': 36},
+    'offre2': {'page': 1, 'x': 75, 'y': 169, 'width': 144, 'height': 37},
+    'offre3': {'page': 1, 'x': 62, 'y': 105, 'width': 144, 'height': 37},
+    'offre4': {'page': 1, 'x': 67, 'y': 124, 'width': 144, 'height': 37},
 }
 
 def generate_pdf_bytes(doc_type, data):
