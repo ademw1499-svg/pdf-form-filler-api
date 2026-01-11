@@ -928,17 +928,25 @@ def send_for_signature():
                 upload_errors.append(f"{doc_type}: PDF generation error - {str(e)}")
                 continue
             
-            # Upload document to Yousign
-            doc_payload = {
-                "file_name": f"{doc_type}.pdf",
-                "file_content": base64.b64encode(pdf_bytes).decode('utf-8'),
-                "nature": "signable_document"
+            # Upload document to Yousign using multipart form data
+            # Yousign v3 API expects file upload, not base64 in JSON
+            files = {
+                'file': (f'{doc_type}.pdf', pdf_bytes, 'application/pdf')
+            }
+            data = {
+                'nature': 'signable_document'
+            }
+            
+            # Use different headers for multipart upload (no Content-Type, let requests set it)
+            upload_headers = {
+                'Authorization': f'Bearer {YOUSIGN_API_KEY}'
             }
             
             doc_response = requests.post(
                 f'{YOUSIGN_API_URL}/signature_requests/{signature_request_id}/documents',
-                headers=headers,
-                json=doc_payload
+                headers=upload_headers,
+                files=files,
+                data=data
             )
             
             if doc_response.status_code == 201:
