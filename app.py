@@ -15,6 +15,16 @@ CORS(app)
 YOUSIGN_API_KEY = os.environ.get('YOUSIGN_API_KEY', '')
 YOUSIGN_API_URL = 'https://api-sandbox.yousign.app/v3'  # Change to https://api.yousign.app/v3 for production
 
+# Debug endpoint to check configuration
+@app.route('/debug-config', methods=['GET'])
+def debug_config():
+    return jsonify({
+        "yousign_configured": bool(YOUSIGN_API_KEY),
+        "yousign_key_length": len(YOUSIGN_API_KEY) if YOUSIGN_API_KEY else 0,
+        "yousign_key_prefix": YOUSIGN_API_KEY[:10] + "..." if YOUSIGN_API_KEY and len(YOUSIGN_API_KEY) > 10 else "not set",
+        "api_url": YOUSIGN_API_URL
+    })
+
 TEMPLATES = {
     'employer': 'FICHE_RENSEIGNEMENTS_EMPLOYEUR_FR_2020.pdf',
     'travailleur': 'FICHE_RENSEIGNEMENTS_TRAVAILLEUR_FR.pdf',
