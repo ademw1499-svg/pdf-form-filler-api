@@ -444,18 +444,18 @@ def fill_mensura():
 # Signature positions for each document (page, x, y, width, height)
 # Coordinates are in points (1 point = 1/72 inch), page starts at 1
 SIGNATURE_POSITIONS = {
-    'employer': {'page': 2, 'x': 100, 'y': 50, 'width': 200, 'height': 50},
-    'travailleur': {'page': 2, 'x': 100, 'y': 50, 'width': 200, 'height': 50},
-    'independant': {'page': 1, 'x': 100, 'y': 50, 'width': 200, 'height': 50},
-    'att_accident': {'page': 1, 'x': 150, 'y': 350, 'width': 200, 'height': 50},
-    'att_seppt': {'page': 1, 'x': 150, 'y': 250, 'width': 200, 'height': 50},
-    'dispense': {'page': 2, 'x': 100, 'y': 100, 'width': 200, 'height': 50},
-    'procuration': {'page': 1, 'x': 100, 'y': 150, 'width': 200, 'height': 50},
-    'mensura': {'page': 4, 'x': 100, 'y': 300, 'width': 200, 'height': 50},
-    'offre1': {'page': 1, 'x': 100, 'y': 100, 'width': 200, 'height': 50},
-    'offre2': {'page': 1, 'x': 100, 'y': 200, 'width': 200, 'height': 50},
-    'offre3': {'page': 1, 'x': 100, 'y': 50, 'width': 200, 'height': 50},
-    'offre4': {'page': 1, 'x': 100, 'y': 50, 'width': 200, 'height': 50},
+    'employer': {'page': 2, 'x': 372, 'y': 102, 'width': 144, 'height': 36},
+    'travailleur': {'page': 2, 'x': 127, 'y': 63, 'width': 144, 'height': 36},
+    'independant': {'page': 1, 'x': 210, 'y': 67, 'width': 144, 'height': 36},
+    'att_accident': {'page': 1, 'x': 68, 'y': 403, 'width': 144, 'height': 36},
+    'att_seppt': {'page': 1, 'x': 70, 'y': 315, 'width': 144, 'height': 36},
+    'dispense': {'page': 2, 'x': 117, 'y': 88, 'width': 144, 'height': 36},
+    'procuration': {'page': 1, 'x': 88, 'y': 178, 'width': 144, 'height': 36},
+    'mensura': None,  # No signature needed
+    'offre1': None,   # No signature needed
+    'offre2': {'page': 1, 'x': 75, 'y': 169, 'width': 144, 'height': 36},
+    'offre3': {'page': 1, 'x': 62, 'y': 105, 'width': 144, 'height': 36},
+    'offre4': {'page': 1, 'x': 67, 'y': 124, 'width': 144, 'height': 36},
 }
 
 def generate_pdf_bytes(doc_type, data):
@@ -929,9 +929,13 @@ def send_for_signature():
         signer_data = signer_response.json()
         signer_id = signer_data['id']
         
-        # Step 4: Add signature fields for each document
+        # Step 4: Add signature fields for each document (skip if no signature needed)
         for doc in uploaded_documents:
-            sig_pos = SIGNATURE_POSITIONS.get(doc['type'], {'page': 1, 'x': 100, 'y': 100, 'width': 200, 'height': 50})
+            sig_pos = SIGNATURE_POSITIONS.get(doc['type'])
+            
+            # Skip if no signature position defined (None)
+            if sig_pos is None:
+                continue
             
             field_payload = {
                 "signer_id": signer_id,
