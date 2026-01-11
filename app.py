@@ -25,6 +25,29 @@ def debug_config():
         "api_url": YOUSIGN_API_URL
     })
 
+# Debug endpoint to test PDF generation
+@app.route('/test-pdf-gen', methods=['POST'])
+def test_pdf_gen():
+    try:
+        data = request.get_json()
+        documents = data.get('documents', [])
+        form_data = data.get('form_data', {})
+        
+        results = {}
+        for doc_type in documents:
+            try:
+                pdf_bytes = generate_pdf_bytes(doc_type, form_data)
+                if pdf_bytes:
+                    results[doc_type] = f"OK - {len(pdf_bytes)} bytes"
+                else:
+                    results[doc_type] = "FAILED - returned None"
+            except Exception as e:
+                results[doc_type] = f"ERROR - {str(e)}"
+        
+        return jsonify({"results": results})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
 TEMPLATES = {
     'employer': 'FICHE_RENSEIGNEMENTS_EMPLOYEUR_FR_2020.pdf',
     'travailleur': 'FICHE_RENSEIGNEMENTS_TRAVAILLEUR_FR.pdf',
