@@ -989,11 +989,14 @@ def send_for_signature():
         signer_id = signer_data['id']
         
         # Step 4: Add signature fields for each document (skip if no signature needed)
+        fields_added = 0
+        field_errors = []
         for doc in uploaded_documents:
             sig_pos = SIGNATURE_POSITIONS.get(doc['type'])
             
             # Skip if no signature position defined (None)
             if sig_pos is None:
+                field_errors.append(f"{doc['type']}: no signature position defined (skipped)")
                 continue
             
             field_payload = {
@@ -1011,8 +1014,25 @@ def send_for_signature():
                 headers=headers,
                 json=field_payload
             )
+            
+            if field_response.status_code == 201:
+                fields_added += 1
+            else:
+                field_errors.append(f"{doc['type']}: field creation failed - {field_response.status_code} - {field_response.text}")
+        
+        # Check if at least one signature field was added
+        if fields_added == 0:
+            return jsonify({
+                "error": "Aucun champ de signature n'a pu être ajouté.",
+                "details": field_errors,
+                "documents_uploaded": [d['type'] for d in uploaded_documents]
+            }), 400
         
         # Step 5: Activate the signature request (send to signer)
+        activate_response = requests.post(
+            f'{YOUSIGN_API_URL}/signature_requests/{signature_request_id}/activate',
+            headers=headers
+        )
         activate_response = requests.post(
             f'{YOUSIGN_API_URL}/signature_requests/{signature_request_id}/activate',
             headers=headers
