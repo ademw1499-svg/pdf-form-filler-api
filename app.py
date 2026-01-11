@@ -1029,18 +1029,30 @@ def send_for_signature():
                 "documents_uploaded": [d['type'] for d in uploaded_documents]
             }), 400
         
-        # Step 5: Activate the signature request (send to signer)
-        activate_response = requests.post(
-            f'{YOUSIGN_API_URL}/signature_requests/{signature_request_id}/activate',
-            headers=headers
-        )
-        activate_response = requests.post(
-            f'{YOUSIGN_API_URL}/signature_requests/{signature_request_id}/activate',
+        # Step 5: Check signature request status and activate if needed
+        status_response = requests.get(
+            f'{YOUSIGN_API_URL}/signature_requests/{signature_request_id}',
             headers=headers
         )
         
-        if activate_response.status_code != 201:
-            return jsonify({"error": f"Failed to activate signature request: {activate_response.text}"}), 500
+        if status_response.status_code == 200:
+            status_data = status_response.json()
+            current_status = status_data.get('status', '')
+            
+            if current_status == 'draft':
+                # Activate the signature request (send to signer)
+                activate_response = requests.post(
+                    f'{YOUSIGN_API_URL}/signature_requests/{signature_request_id}/activate',
+                    headers=headers
+                )
+                
+                if activate_response.status_code not in [200, 201]:
+                    return jsonify({"error": f"Failed to activate signature request: {activate_response.text}"}), 500
+            elif current_status == 'ongoing':
+                # Already activated, that's fine
+                pass
+            else:
+                return jsonify({"error": f"Unexpected signature request status: {current_status}"}), 500
         
         return jsonify({
             "success": True,
@@ -1048,6 +1060,103 @@ def send_for_signature():
             "signature_request_id": signature_request_id,
             "documents_count": len(uploaded_documents)
         })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# Webhook endpoint to receive notifications when documents are signed
+@app.route('/yousign-webhook', methods=['POST'])
+def yousign_webhook():
+    """
+    Yousign will call this endpoint when:
+    - A document is signed
+    - A signature request is completed
+    - Other events occur
+    
+    Configure this URL in your Yousign dashboard:
+    https://web-production-83d7d3.up.railway.app/yousign-webhook
+    """
+    try:
+        data = request.get_json()
+        
+        event_type = data.get('event_name', '')
+        event_data = data.get('data', {})
+        
+        # Log the event (you can see this in Railway logs)
+        print(f"Yousign webhook received: {event_type}")
+        print(f"Data: {event_data}")
+        
+        # Handle signature request completed
+        if event_type == 'signature_request.done':
+            signature_request_id = event_data.get('signature_request', {}).get('id', '')
+            print(f"✅ Signature request completed: {signature_request_id}")
+            
+            # Here you could:
+            # - Download the signed documents
+            # - Send an email notification
+            # - Update a database
+            # - etc.
+        
+        return jsonify({"status": "received"}), 200
+        
+    except Exception as e:
+        print(f"Webhook error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+# Endpoint to download signed documents
+@app.route('/download-signed/<signature_request_id>', methods=['GET'])
+def download_signed(signature_request_id):
+    """
+    Download all signed documents from a completed signature request
+    """
+    try:
+        if not YOUSIGN_API_KEY:
+            return jsonify({"error": "Yousign API key not configured"}), 500
+        
+        headers = {
+            'Authorization': f'Bearer {YOUSIGN_API_KEY}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Get signature request details
+        sig_response = requests.get(
+            f'{YOUSIGN_API_URL}/signature_requests/{signature_request_id}',
+            headers=headers
+        )
+        
+        if sig_response.status_code != 200:
+            return jsonify({"error": f"Failed to get signature request: {sig_response.text}"}), 500
+        
+        sig_data = sig_response.json()
+        
+        if sig_data.get('status') != 'done':
+            return jsonify({"error": f"Signature request not completed yet. Status: {sig_data.get('status')}"}), 400
+        
+        # Get documents
+        documents = sig_data.get('documents', [])
+        
+        if not documents:
+            return jsonify({"error": "No documents found"}), 404
+        
+        # For single document, return it directly
+        # For multiple documents, you might want to zip them
+        doc_id = documents[0].get('id')
+        
+        # Download the signed document
+        doc_response = requests.get(
+            f'{YOUSIGN_API_URL}/signature_requests/{signature_request_id}/documents/{doc_id}/download',
+            headers=headers
+        )
+        
+        if doc_response.status_code != 200:
+            return jsonify({"error": f"Failed to download document: {doc_response.text}"}), 500
+        
+        return send_file(
+            io.BytesIO(doc_response.content),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f'signed_document_{signature_request_id}.pdf'
+        )
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
