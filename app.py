@@ -857,6 +857,57 @@ def fill_mensura_pdf(d):
     c.save()
     return merge(TEMPLATES['mensura'],p,4).getvalue()
 
+# Download all documents as a ZIP file
+@app.route('/download-all-zip', methods=['POST'])
+def download_all_zip():
+    """
+    Generate multiple PDFs and return them as a ZIP file
+    Expected JSON:
+    {
+        "documents": ["employer", "worker", "offre1", ...],
+        "form_data": { ... all form fields ... }
+    }
+    """
+    import zipfile
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        documents = data.get('documents', [])
+        form_data = data.get('form_data', {})
+        
+        if not documents:
+            return jsonify({"error": "No documents selected"}), 400
+        
+        # Create a ZIP file in memory
+        zip_buffer = io.BytesIO()
+        
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for doc_type in documents:
+                try:
+                    pdf_bytes = generate_pdf_bytes(doc_type, form_data)
+                    if pdf_bytes:
+                        # Add PDF to ZIP with a nice filename
+                        filename = f"{doc_type}.pdf"
+                        zip_file.writestr(filename, pdf_bytes)
+                except Exception as e:
+                    print(f"Error generating {doc_type}: {str(e)}")
+                    continue
+        
+        zip_buffer.seek(0)
+        
+        return send_file(
+            zip_buffer,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=f'documents_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
+        )
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/send-for-signature', methods=['POST'])
 def send_for_signature():
     """
