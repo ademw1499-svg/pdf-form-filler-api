@@ -33,6 +33,29 @@ TEMPLATES = {
     'offre_nl': 'Offre_collaboration_NL.pdf',
 }
 
+# Documents statiques - inclus automatiquement dans le ZIP sans modification
+# Format: 'clé': ('nom_fichier_sur_serveur', 'nom_affiché_dans_zip')
+STATIC_DOCUMENTS = {
+    'obligation_employeur': ('Obligation_Employeur_2025.pdf', 'Obligation_Employeur_2025.pdf'),
+}
+
+# Mapping : quand un document principal est sélectionné, quels documents statiques inclure
+DOCUMENT_BUNDLES = {
+    'offre': ['obligation_employeur'],
+    'employer': [],
+    'worker': [],
+    'travailleur': [],
+    'independent': [],
+    'independant': [],
+    'seppt': [],
+    'att_seppt': [],
+    'accident': [],
+    'att_accident': [],
+    'dispense': [],
+    'procuration': [],
+    'mensura': [],
+}
+
 # Coordinate conversion constants
 SCALE_X, SCALE_Y = 595/707, 842/1000
 
@@ -67,6 +90,25 @@ def merge(tpl, pkt, npg=1):
     return out
 
 
+# ============== STATIC DOCUMENTS HELPERS ==============
+
+def get_static_document_bytes(doc_key):
+    """Lit un document statique depuis le disque et retourne ses bytes"""
+    if doc_key not in STATIC_DOCUMENTS:
+        return None, None
+    filename, display_name = STATIC_DOCUMENTS[doc_key]
+    if os.path.exists(filename):
+        with open(filename, 'rb') as f:
+            return f.read(), display_name
+    print(f"ATTENTION: Document statique introuvable: {filename}")
+    return None, None
+
+def get_bundle_for_document(doc_type):
+    """Retourne la liste des documents statiques associés à un type de document"""
+    base_type = doc_type.replace('1', '').replace('2', '').replace('3', '').replace('4', '')
+    return DOCUMENT_BUNDLES.get(base_type, [])
+
+
 # ============== HEALTH & DEBUG ENDPOINTS ==============
 
 @app.route('/health', methods=['GET'])
@@ -76,17 +118,26 @@ def health():
         "status": "healthy",
         "ts": datetime.now().isoformat(),
         "bilingual_support": True,
-        "bilingual_documents": ["att_seppt", "att_accident", "offre"]
+        "bilingual_documents": ["att_seppt", "att_accident", "offre"],
+        "static_documents": list(STATIC_DOCUMENTS.keys())
     })
 
 @app.route('/debug-config', methods=['GET'])
 def debug_config():
     """Debug endpoint to check configuration"""
+    static_status = {}
+    for key, (filename, display) in STATIC_DOCUMENTS.items():
+        static_status[key] = {
+            "filename": filename,
+            "exists": os.path.exists(filename),
+            "size": os.path.getsize(filename) if os.path.exists(filename) else 0
+        }
     return jsonify({
         "bilingual_support": True,
         "nl_templates": ["att_accident_nl", "att_seppt_nl", "offre_nl"],
         "templates_count": len(TEMPLATES),
-        "supported_languages": ["fr", "nl"]
+        "supported_languages": ["fr", "nl"],
+        "static_documents": static_status
     })
 
 @app.route('/test-pdf-gen', methods=['POST'])
@@ -97,7 +148,7 @@ def test_pdf_gen():
         documents = data.get('documents', [])
         form_data = data.get('form_data', {})
         language_prefs = data.get('language_prefs', {})
-        
+
         results = {}
         for doc_type in documents:
             try:
@@ -108,7 +159,7 @@ def test_pdf_gen():
                     results[doc_type] = "FAILED - returned None"
             except Exception as e:
                 results[doc_type] = f"ERROR - {str(e)}"
-        
+
         return jsonify({"results": results})
     except Exception as e:
         return jsonify({"error": str(e)})
@@ -809,7 +860,6 @@ def fill_att_accident_nl():
         return jsonify({"error": "No data"}), 400
     try:
         p, c = newcan()
-        # NL version has Y offset of +12 compared to FR
         if d.get('nom_soussigne'):
             txt(c, d['nom_soussigne'], 283, 142)
         if d.get('niss'):
@@ -842,7 +892,6 @@ def fill_att_seppt_nl():
         return jsonify({"error": "No data"}), 400
     try:
         p, c = newcan()
-        # NL version has Y offset of +11 for most fields, signature at 630
         if d.get('nom_soussigne'):
             txt(c, d['nom_soussigne'], 313, 140)
         if d.get('niss'):
@@ -875,12 +924,10 @@ def fill_offre_nl():
         return jsonify({"error": "No data"}), 400
     try:
         p, c = newcan()
-        
-        # Helper function to get value with fallback
+
         def val(primary, fallback):
             return d.get(primary) or d.get(fallback)
-        
-        # Page 1 - Company info (same coords as offre1)
+
         if d.get('nom_societe'):
             txt(c, d['nom_societe'], 223, 470)
         if val('adresse_1', 'adresse_siege_social_1'):
@@ -891,12 +938,10 @@ def fill_offre_nl():
             txt(c, d['num_tva'], 217, 551)
         if val('represente_par', 'nom_prenom_gerant'):
             txt(c, val('represente_par', 'nom_prenom_gerant'), 217, 577)
-        
-        # Pages 2-17 - Terms and conditions (no fillable fields)
+
         for _ in range(16):
             c.showPage()
-        
-        # Page 18 - Entry date and company info repeat (same coords as offre2)
+
         c.showPage()
         if d.get('nom_societe'):
             txt(c, d['nom_societe'], 210, 222)
@@ -916,8 +961,7 @@ def fill_offre_nl():
             txt(c, d['date_entree_annee'], 423, 587)
         if val('date_fait', 'date_signature'):
             txt(c, val('date_fait', 'date_signature'), 189, 640)
-        
-        # Page 19 - SEPPT attestation (same coords as offre3)
+
         c.showPage()
         if val('nom_soussigne', 'nom_prenom_gerant'):
             txt(c, val('nom_soussigne', 'nom_prenom_gerant'), 257, 183)
@@ -939,8 +983,7 @@ def fill_offre_nl():
             txt(c, d['num_tva'], 251, 311)
         if d.get('date_signature'):
             txt(c, d['date_signature'], 205, 801)
-        
-        # Page 20 - Accident attestation (same coords as offre4)
+
         c.showPage()
         if val('nom_soussigne', 'nom_prenom_gerant'):
             txt(c, val('nom_soussigne', 'nom_prenom_gerant'), 246, 185)
@@ -962,17 +1005,16 @@ def fill_offre_nl():
             txt(c, d['num_tva'], 243, 312)
         if d.get('date_signature'):
             txt(c, d['date_signature'], 203, 782)
-        
+
         c.save()
         return send_file(merge(TEMPLATES['offre_nl'], p, 20), mimetype='application/pdf', as_attachment=True, download_name=f"offre_collaboration_NL_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-# ============== PDF GENERATION FUNCTIONS (for ZIP and internal use) ==============
+# ============== PDF GENERATION FUNCTIONS ==============
 
 def fill_employer_pdf(d):
-    """Generate Employer PDF bytes"""
     p, c = newcan()
     if d.get('recu_par'):
         txt(c, d['recu_par'], 235, 198)
@@ -1083,7 +1125,6 @@ def fill_employer_pdf(d):
 
 
 def fill_att_accident_pdf(d, lang='fr'):
-    """Generate Attestation Accident PDF bytes - FR or NL"""
     p, c = newcan()
     if lang == 'nl':
         tpl = TEMPLATES['att_accident_nl']
@@ -1114,7 +1155,6 @@ def fill_att_accident_pdf(d, lang='fr'):
 
 
 def fill_att_seppt_pdf(d, lang='fr'):
-    """Generate Attestation SEPPT PDF bytes - FR or NL"""
     p, c = newcan()
     if lang == 'nl':
         tpl = TEMPLATES['att_seppt_nl']
@@ -1147,7 +1187,6 @@ def fill_att_seppt_pdf(d, lang='fr'):
 
 
 def fill_independant_pdf(d):
-    """Generate Indépendant PDF bytes"""
     p, c = newcan()
     if d.get('contrat_email'):
         txt(c, 'X', 296, 133, 12)
@@ -1226,7 +1265,6 @@ def fill_independant_pdf(d):
 
 
 def fill_travailleur_pdf(d):
-    """Generate Travailleur PDF bytes"""
     p, c = newcan()
     if d.get('contrat_email'):
         txt(c, 'X', 296, 135, 12)
@@ -1396,7 +1434,6 @@ def fill_travailleur_pdf(d):
 
 
 def fill_offre1_pdf(d):
-    """Generate Offre Part 1 PDF bytes"""
     p, c = newcan()
     if d.get('nom_societe'):
         txt(c, d['nom_societe'], 223, 470)
@@ -1413,7 +1450,6 @@ def fill_offre1_pdf(d):
 
 
 def fill_offre2_pdf(d):
-    """Generate Offre Part 2 PDF bytes"""
     p, c = newcan()
     if d.get('nom_societe'):
         txt(c, d['nom_societe'], 210, 222)
@@ -1438,7 +1474,6 @@ def fill_offre2_pdf(d):
 
 
 def fill_offre3_pdf(d):
-    """Generate Offre Part 3 PDF bytes"""
     p, c = newcan()
     if d.get('nom_soussigne'):
         txt(c, d['nom_soussigne'], 257, 183)
@@ -1465,7 +1500,6 @@ def fill_offre3_pdf(d):
 
 
 def fill_offre4_pdf(d):
-    """Generate Offre Part 4 PDF bytes"""
     p, c = newcan()
     if d.get('nom_soussigne'):
         txt(c, d['nom_soussigne'], 246, 185)
@@ -1492,13 +1526,9 @@ def fill_offre4_pdf(d):
 
 
 def fill_offre_nl_pdf(d):
-    """Generate Dutch Offre PDF bytes - Single 20-page document"""
     p, c = newcan()
-    
     def val(primary, fallback):
         return d.get(primary) or d.get(fallback)
-    
-    # Page 1
     if d.get('nom_societe'):
         txt(c, d['nom_societe'], 223, 470)
     if val('adresse_1', 'adresse_siege_social_1'):
@@ -1509,12 +1539,8 @@ def fill_offre_nl_pdf(d):
         txt(c, d['num_tva'], 217, 551)
     if val('represente_par', 'nom_prenom_gerant'):
         txt(c, val('represente_par', 'nom_prenom_gerant'), 217, 577)
-    
-    # Pages 2-17
     for _ in range(16):
         c.showPage()
-    
-    # Page 18
     c.showPage()
     if d.get('nom_societe'):
         txt(c, d['nom_societe'], 210, 222)
@@ -1534,8 +1560,6 @@ def fill_offre_nl_pdf(d):
         txt(c, d['date_entree_annee'], 423, 587)
     if val('date_fait', 'date_signature'):
         txt(c, val('date_fait', 'date_signature'), 189, 640)
-    
-    # Page 19
     c.showPage()
     if val('nom_soussigne', 'nom_prenom_gerant'):
         txt(c, val('nom_soussigne', 'nom_prenom_gerant'), 257, 183)
@@ -1557,8 +1581,6 @@ def fill_offre_nl_pdf(d):
         txt(c, d['num_tva'], 251, 311)
     if d.get('date_signature'):
         txt(c, d['date_signature'], 205, 801)
-    
-    # Page 20
     c.showPage()
     if val('nom_soussigne', 'nom_prenom_gerant'):
         txt(c, val('nom_soussigne', 'nom_prenom_gerant'), 246, 185)
@@ -1580,13 +1602,11 @@ def fill_offre_nl_pdf(d):
         txt(c, d['num_tva'], 243, 312)
     if d.get('date_signature'):
         txt(c, d['date_signature'], 203, 782)
-    
     c.save()
     return merge(TEMPLATES['offre_nl'], p, 20).getvalue()
 
 
 def fill_procuration_pdf(d):
-    """Generate Procuration PDF bytes"""
     p, c = newcan()
     if d.get('num_entreprise'):
         txt(c, d['num_entreprise'], 215, 115)
@@ -1623,7 +1643,6 @@ def fill_procuration_pdf(d):
 
 
 def fill_dispense_pdf(d):
-    """Generate Dispense PDF bytes"""
     p, c = newcan()
     if d.get('nom_soussigne'):
         txt(c, d['nom_soussigne'], 334, 188)
@@ -1649,7 +1668,6 @@ def fill_dispense_pdf(d):
 
 
 def fill_mensura_pdf(d):
-    """Generate Mensura PDF bytes"""
     p, c = newcan()
     if d.get('nom_entreprise'):
         txt(c, d['nom_entreprise'], 144, 236)
@@ -1693,26 +1711,20 @@ def fill_mensura_pdf(d):
 # ============== PDF GENERATION DISPATCHER ==============
 
 def generate_pdf_bytes(doc_type, data, lang_prefs=None):
-    """
-    Generate a PDF and return bytes
-    Supports bilingual documents (FR/NL) for: accident, seppt, offre
-    """
     if lang_prefs is None:
         lang_prefs = {}
-    
-    # Handle bilingual documents
+
     if doc_type in ['accident', 'att_accident']:
         lang = lang_prefs.get('accident', 'fr')
         return fill_att_accident_pdf(data, lang)
-    
+
     if doc_type in ['seppt', 'att_seppt']:
         lang = lang_prefs.get('seppt', 'fr')
         return fill_att_seppt_pdf(data, lang)
-    
+
     if doc_type == 'offre' and lang_prefs.get('offre') == 'nl':
         return fill_offre_nl_pdf(data)
-    
-    # Map doc_type to fill functions
+
     fill_functions = {
         'employer': fill_employer_pdf,
         'worker': fill_travailleur_pdf,
@@ -1727,10 +1739,10 @@ def generate_pdf_bytes(doc_type, data, lang_prefs=None):
         'offre3': fill_offre3_pdf,
         'offre4': fill_offre4_pdf,
     }
-    
+
     if doc_type in fill_functions:
         return fill_functions[doc_type](data)
-    
+
     return None
 
 
@@ -1738,72 +1750,74 @@ def generate_pdf_bytes(doc_type, data, lang_prefs=None):
 
 @app.route('/download-all-zip', methods=['POST'])
 def download_all_zip():
-    """
-    Generate multiple PDFs and return them as a ZIP file
-    
-    Expected JSON:
-    {
-        "documents": ["employer", "worker", "seppt", "accident", "offre", ...],
-        "form_data": { ... all form fields ... },
-        "language_prefs": {
-            "seppt": "nl",
-            "accident": "fr",
-            "offre": "nl"
-        }
-    }
-    """
     try:
         data = request.get_json()
         if not data:
             return jsonify({"error": "No data provided"}), 400
-        
+
         documents = data.get('documents', [])
         form_data = data.get('form_data', {})
         language_prefs = data.get('language_prefs', {})
-        
+
         if not documents:
             return jsonify({"error": "No documents selected"}), 400
-        
-        # Create ZIP file in memory
+
         zip_buffer = io.BytesIO()
-        
+        static_docs_added = set()
+
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             for doc_type in documents:
                 try:
-                    # Special handling for offre with NL
                     if doc_type == 'offre' and language_prefs.get('offre') == 'nl':
                         pdf_bytes = fill_offre_nl_pdf(form_data)
                         if pdf_bytes:
                             zip_file.writestr("offre_collaboration_NL.pdf", pdf_bytes)
+                            # Ajouter documents statiques associés
+                            bundle = get_bundle_for_document(doc_type)
+                            for static_key in bundle:
+                                if static_key not in static_docs_added:
+                                    static_bytes, display_name = get_static_document_bytes(static_key)
+                                    if static_bytes:
+                                        zip_file.writestr(display_name, static_bytes)
+                                        static_docs_added.add(static_key)
+                                        print(f"Document statique ajouté: {display_name}")
                         continue
-                    
-                    # Generate PDF with language preference
+
                     pdf_bytes = generate_pdf_bytes(doc_type, form_data, language_prefs)
-                    
+
                     if pdf_bytes:
-                        # Determine filename with language suffix
                         if doc_type in ['accident', 'att_accident'] and language_prefs.get('accident') == 'nl':
                             filename = f"{doc_type}_NL.pdf"
                         elif doc_type in ['seppt', 'att_seppt'] and language_prefs.get('seppt') == 'nl':
                             filename = f"{doc_type}_NL.pdf"
                         else:
                             filename = f"{doc_type}.pdf"
-                        
+
                         zip_file.writestr(filename, pdf_bytes)
-                        
+
+                        # Ajouter documents statiques associés
+                        bundle = get_bundle_for_document(doc_type)
+                        for static_key in bundle:
+                            if static_key not in static_docs_added:
+                                static_bytes, display_name = get_static_document_bytes(static_key)
+                                if static_bytes:
+                                    zip_file.writestr(display_name, static_bytes)
+                                    static_docs_added.add(static_key)
+                                    print(f"Document statique ajouté: {display_name}")
+
                 except Exception as e:
                     print(f"Error generating {doc_type}: {str(e)}")
                     continue
-        
+
         zip_buffer.seek(0)
-        
+
         return send_file(
             zip_buffer,
             mimetype='application/zip',
             as_attachment=True,
             download_name=f'documents_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
         )
-        
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
