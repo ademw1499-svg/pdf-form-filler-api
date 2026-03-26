@@ -670,6 +670,18 @@ def download_all_zip():
         return jsonify({"error": str(e)}), 500
 
 # ============== MAIN ==============
+@app.route('/debug-offre-raw', methods=['GET'])
+def debug_offre_raw():
+    """Retourne le template brut sans modification pour diagnostiquer les pages."""
+    lang = request.args.get('lang', 'fr')
+    tpl = TEMPLATES['offre_nl'] if lang == 'nl' else TEMPLATES['offre_fr']
+    rd = PdfReader(tpl)
+    nb = len(rd.pages)
+    # Retourne aussi le PDF brut
+    return send_file(tpl, mimetype='application/pdf',
+                    as_attachment=True,
+                    download_name=f'offre_template_brut_{lang}_{nb}pages.pdf')
+
 @app.route('/test-zip', methods=['GET'])
 def test_zip():
     """Test endpoint — generates ZIP with all docs using fake data. No JS needed."""
