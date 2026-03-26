@@ -20,10 +20,10 @@ TEMPLATES = {
     'dispense': 'Dispense_partielle_de_versement_du_precompte_professionnel.pdf',
     'mensura': 'FOR140106_FR.pdf',
     'procuration': 'PROCURATION.pdf',
-    'offre_fr': 'Offre de collaboration FR 2025-2026.pdf',
-    'offre_nl': '2025 Offre de collaboration FR 2025-2026_trad.pdf',
-    'att_accident_nl': 'ATTESTATION ASSURANCE ACCIDENT DE TRAVAIL_trad.pdf',
-    'att_seppt_nl': 'ATTESTATION SEPPT_trad.pdf',
+    'offre_fr': 'Offre_de_collaboration_FR_2025-2026.pdf',
+    'offre_nl': 'Offre_de_collaboration_NL_2025-2026.pdf',
+    'att_accident_nl': 'Attestation_accident_travail_NL.pdf',
+    'att_seppt_nl': 'Attestation_SEPPT_NL.pdf',
 }
 
 # ============== STATIC DOCUMENTS ==============
@@ -31,7 +31,7 @@ STATIC_DOCUMENTS = {
     'obligation_employeur': ('Obligation_Employeur_2025.pdf', 'Obligation_Employeur_2025.pdf'),
 }
 
-# *** FIX: obligation_employeur inclus avec employer + travailleur + offre ***
+# FIX: obligation_employeur inclus avec employer + travailleur + offre
 DOCUMENT_BUNDLES = {
     'offre':       ['obligation_employeur'],
     'employer':    ['obligation_employeur'],
