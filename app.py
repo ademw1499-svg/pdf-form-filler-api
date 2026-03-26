@@ -465,8 +465,9 @@ def make_overlay(draw_fn):
 def merge_selective(tpl_path, overlays):
     """
     Merge overlays only onto specific pages.
-    overlays: dict {page_index: pdf_bytes} — only pages with content to fill.
-    Static pages are copied as-is from the template, preserving all content.
+    overlays: dict {page_index: pdf_bytes}
+    Notre texte est mis PAR-DESSUS le template (ov_page.merge_page(pg)).
+    Les pages sans overlay passent intactes.
     """
     rd = PdfReader(tpl_path)
     wr = PdfWriter()
@@ -474,8 +475,11 @@ def merge_selective(tpl_path, overlays):
         pg = rd.pages[i]
         if i in overlays:
             ov = PdfReader(io.BytesIO(overlays[i]))
-            pg.merge_page(ov.pages[0])
-        wr.add_page(pg)
+            ov_page = ov.pages[0]
+            ov_page.merge_page(pg)  # template DERRIERE notre texte
+            wr.add_page(ov_page)
+        else:
+            wr.add_page(pg)
     out = io.BytesIO()
     wr.write(out)
     out.seek(0)
