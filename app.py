@@ -10,25 +10,28 @@ from datetime import datetime
 app = Flask(__name__)
 CORS(app)
 
+# ============== CONFIGURATION ==============
 TEMPLATES = {
     'employer': 'FICHE_RENSEIGNEMENTS_EMPLOYEUR_FR_2020.pdf',
     'travailleur': 'FICHE_RENSEIGNEMENTS_TRAVAILLEUR_FR.pdf',
     'independant': 'FICHE_RENSEIGNEMENTS_INDEPENDANT.pdf',
     'att_accident_fr': 'ATTESTATION_ASSURANCE_ACCIDENT_DE_TRAVAIL.pdf',
     'att_seppt_fr': 'ATTESTATION_SEPPT.pdf',
-    'dispense': 'Dispense_partielle_de_versement_du_precompte_professionnel.pdf',
+    'dispense': 'Dispense_partielle_de_versement_du_pre_compte_professionnel.pdf',
     'mensura': 'FOR140106_FR.pdf',
     'procuration': 'PROCURATION.pdf',
     'offre_fr': 'Offre_de_collaboration_FR_2025-2026.pdf',
-    'offre_nl': 'Offre_de_collaboration_NL_2025-2026.pdf',
-    'att_accident_nl': 'Attestation_accident_travail_NL.pdf',
-    'att_seppt_nl': 'Attestation_SEPPT_NL.pdf',
+    'offre_nl': '2025 Offre de collaboration FR 2025-2026_trad.pdf',
+    'att_accident_nl': 'ATTESTATION ASSURANCE ACCIDENT DE TRAVAIL_trad.pdf',
+    'att_seppt_nl': 'ATTESTATION SEPPT_trad.pdf',
 }
 
+# ============== STATIC DOCUMENTS ==============
 STATIC_DOCUMENTS = {
     'obligation_employeur': ('Obligation_Employeur_2025.pdf', 'Obligation_Employeur_2025.pdf'),
 }
 
+# FIX: obligation_employeur now bundled with employer + travailleur + offre
 DOCUMENT_BUNDLES = {
     'offre':       ['obligation_employeur'],
     'employer':    ['obligation_employeur'],
@@ -41,6 +44,7 @@ DOCUMENT_BUNDLES = {
     'mensura':     [],
 }
 
+# ============== HELPER FUNCTIONS ==============
 SCALE_X, SCALE_Y = 595/707, 842/1000
 
 def cvt(x, y):
@@ -69,27 +73,6 @@ def merge(tpl, pkt, npg=1):
     out.seek(0)
     return out
 
-def make_overlay(draw_fn):
-    p = io.BytesIO()
-    c = canvas.Canvas(p, pagesize=(595, 842))
-    draw_fn(c)
-    c.save()
-    return p.getvalue()
-
-def merge_selective(tpl_path, overlays):
-    rd = PdfReader(tpl_path)
-    wr = PdfWriter()
-    for i in range(len(rd.pages)):
-        pg = rd.pages[i]
-        if i in overlays:
-            ov = PdfReader(io.BytesIO(overlays[i]))
-            pg.merge_page(ov.pages[0])
-        wr.add_page(pg)
-    out = io.BytesIO()
-    wr.write(out)
-    out.seek(0)
-    return out
-
 def get_static_document_bytes(doc_key):
     if doc_key not in STATIC_DOCUMENTS:
         return None, None
@@ -103,6 +86,7 @@ def get_static_document_bytes(doc_key):
 def get_bundle_for_document(doc_type):
     return DOCUMENT_BUNDLES.get(doc_type, [])
 
+# ============== HEALTH & DEBUG ==============
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({
@@ -131,6 +115,7 @@ def debug_config():
         "document_bundles": DOCUMENT_BUNDLES, "supported_languages": ["fr", "nl"]
     })
 
+# ============== INDIVIDUAL ENDPOINTS ==============
 @app.route('/fill-employer-form', methods=['POST'])
 def fill_employer():
     d = request.get_json()
@@ -239,6 +224,7 @@ def fill_mensura():
                         as_attachment=True, download_name='Contrat_Mensura.pdf')
     except Exception as e: return jsonify({"error": str(e)}), 500
 
+# ============== PDF GENERATION FUNCTIONS ==============
 def fill_employer_pdf(d):
     p, c = newcan()
     if d.get('recu_par'): txt(c, d['recu_par'], 235, 198)
@@ -273,8 +259,7 @@ def fill_employer_pdf(d):
     elif s == 'NON': txt(c, 'X', 618, 899, 12)
     c.showPage()
     if d.get('regime_horaire'): txt(c, d['regime_horaire'], 357, 148)
-    for day, y in [('lundi',228),('mardi',247),('mercredi',266),('jeudi',285),
-                   ('vendredi',304),('samedi',331),('dimanche',351)]:
+    for day, y in [('lundi',228),('mardi',247),('mercredi',266),('jeudi',285),('vendredi',304),('samedi',331),('dimanche',351)]:
         if d.get(f'{day}_matin_de'): txt(c, d[f'{day}_matin_de'], 213, y, 9)
         if d.get(f'{day}_matin_a'): txt(c, d[f'{day}_matin_a'], 276, y, 9)
         if d.get(f'{day}_pause_de'): txt(c, d[f'{day}_pause_de'], 363, y, 9)
@@ -469,18 +454,57 @@ def fill_att_seppt_pdf(d, lang='fr'):
     c.save()
     return merge(tpl, p, 1).getvalue()
 
+def make_overlay(draw_fn):
+    """Create a single-page PDF overlay by calling draw_fn(canvas)"""
+    p = io.BytesIO()
+    c = canvas.Canvas(p, pagesize=(595, 842))
+    draw_fn(c)
+    c.save()
+    return p.getvalue()
+
+def merge_selective(tpl_path, overlays):
+    """
+    Merge overlays only onto specific pages.
+    overlays: dict {page_index: pdf_bytes} — only pages with content to fill.
+    Static pages are copied as-is from the template, preserving all content.
+    """
+    rd = PdfReader(tpl_path)
+    wr = PdfWriter()
+    for i in range(len(rd.pages)):
+        pg = rd.pages[i]
+        if i in overlays:
+            ov = PdfReader(io.BytesIO(overlays[i]))
+            pg.merge_page(ov.pages[0])
+        wr.add_page(pg)
+    out = io.BytesIO()
+    wr.write(out)
+    out.seek(0)
+    return out
+
 def fill_offre_pdf(d, lang='fr'):
+    """
+    Offre de collaboration — 20 pages.
+    Only pages 1, 13, 14, 15 have fillable fields.
+    Pages 2-12 and 16-20 are static — we preserve them untouched.
+    """
     tpl = TEMPLATES['offre_nl'] if lang == 'nl' else TEMPLATES['offre_fr']
-    def val(a, b): return d.get(a) or d.get(b)
+
+    def val(primary, fallback):
+        return d.get(primary) or d.get(fallback)
+
     overlays = {}
-    def p1(c):
+
+    # --- Page 1 (index 0): Cover — company info ---
+    def draw_p1(c):
         if d.get('nom_societe'): txt(c, d['nom_societe'], 223, 470)
         if val('adresse_1','adresse_siege_social_1'): txt(c, val('adresse_1','adresse_siege_social_1'), 218, 496)
         if val('adresse_2','adresse_siege_social_2'): txt(c, val('adresse_2','adresse_siege_social_2'), 217, 526)
         if d.get('num_tva') or d.get('num_entreprise'): txt(c, d.get('num_tva') or d.get('num_entreprise'), 217, 551)
         if val('represente_par','nom_prenom_gerant'): txt(c, val('represente_par','nom_prenom_gerant'), 217, 577)
-    overlays[0] = make_overlay(p1)
-    def p13(c):
+    overlays[0] = make_overlay(draw_p1)
+
+    # --- Page 13 (index 12): Conditions particulières ---
+    def draw_p13(c):
         if d.get('nom_societe'): txt(c, d['nom_societe'], 210, 222)
         if val('adresse_1','adresse_siege_social_1'): txt(c, val('adresse_1','adresse_siege_social_1'), 207, 238)
         if val('adresse_2','adresse_siege_social_2'): txt(c, val('adresse_2','adresse_siege_social_2'), 202, 258)
@@ -490,8 +514,10 @@ def fill_offre_pdf(d, lang='fr'):
         if d.get('date_entree_mois'): txt(c, d['date_entree_mois'], 370, 585)
         if d.get('date_entree_annee'): txt(c, d['date_entree_annee'], 423, 587)
         if val('date_fait','date_signature'): txt(c, val('date_fait','date_signature'), 189, 640)
-    overlays[12] = make_overlay(p13)
-    def p14(c):
+    overlays[12] = make_overlay(draw_p13)
+
+    # --- Page 14 (index 13): Procuration ---
+    def draw_p14(c):
         if val('nom_soussigne','nom_prenom_gerant'): txt(c, val('nom_soussigne','nom_prenom_gerant'), 257, 183)
         if val('niss','niss_gerant'): txt(c, val('niss','niss_gerant'), 255, 200)
         if val('domicile_1','adresse_siege_social_1'): txt(c, val('domicile_1','adresse_siege_social_1'), 255, 214)
@@ -502,8 +528,10 @@ def fill_offre_pdf(d, lang='fr'):
         if val('adresse_2','adresse_siege_social_2'): txt(c, val('adresse_2','adresse_siege_social_2'), 252, 295)
         if d.get('num_tva') or d.get('num_entreprise'): txt(c, d.get('num_tva') or d.get('num_entreprise'), 251, 311)
         if d.get('date_signature'): txt(c, d['date_signature'], 205, 801)
-    overlays[13] = make_overlay(p14)
-    def p15(c):
+    overlays[13] = make_overlay(draw_p14)
+
+    # --- Page 15 (index 14): Contrat de mandat ---
+    def draw_p15(c):
         if val('nom_soussigne','nom_prenom_gerant'): txt(c, val('nom_soussigne','nom_prenom_gerant'), 246, 185)
         if val('niss','niss_gerant'): txt(c, val('niss','niss_gerant'), 245, 200)
         if val('domicile_1','adresse_siege_social_1'): txt(c, val('domicile_1','adresse_siege_social_1'), 246, 216)
@@ -514,7 +542,8 @@ def fill_offre_pdf(d, lang='fr'):
         if val('adresse_2','adresse_siege_social_2'): txt(c, val('adresse_2','adresse_siege_social_2'), 243, 297)
         if d.get('num_tva') or d.get('num_entreprise'): txt(c, d.get('num_tva') or d.get('num_entreprise'), 243, 312)
         if d.get('date_signature'): txt(c, d['date_signature'], 203, 782)
-    overlays[14] = make_overlay(p15)
+    overlays[14] = make_overlay(draw_p15)
+
     return merge_selective(tpl, overlays).getvalue()
 
 def fill_procuration_pdf(d):
@@ -574,14 +603,12 @@ def fill_mensura_pdf(d):
     c.save()
     return merge(TEMPLATES['mensura'], p, 4).getvalue()
 
+# ============== DISPATCHER ==============
 def generate_pdf_bytes(doc_type, data, lang_prefs=None):
     if lang_prefs is None: lang_prefs = {}
-    if doc_type in ['accident','att_accident']:
-        return fill_att_accident_pdf(data, lang_prefs.get('accident','fr'))
-    if doc_type in ['seppt','att_seppt']:
-        return fill_att_seppt_pdf(data, lang_prefs.get('seppt','fr'))
-    if doc_type == 'offre':
-        return fill_offre_pdf(data, lang_prefs.get('offre','fr'))
+    if doc_type in ['accident','att_accident']: return fill_att_accident_pdf(data, lang_prefs.get('accident','fr'))
+    if doc_type in ['seppt','att_seppt']: return fill_att_seppt_pdf(data, lang_prefs.get('seppt','fr'))
+    if doc_type == 'offre': return fill_offre_pdf(data, lang_prefs.get('offre','fr'))
     generators = {
         'employer': fill_employer_pdf, 'travailleur': fill_travailleur_pdf,
         'independant': fill_independant_pdf, 'dispense': fill_dispense_pdf,
@@ -590,6 +617,7 @@ def generate_pdf_bytes(doc_type, data, lang_prefs=None):
     if doc_type in generators: return generators[doc_type](data)
     return None
 
+# ============== ZIP ENDPOINT ==============
 @app.route('/download-all-zip', methods=['POST'])
 def download_all_zip():
     try:
@@ -623,6 +651,7 @@ def download_all_zip():
                         else:
                             filename = FILENAMES.get(doc_type, f"{doc_type}.pdf")
                         zf.writestr(filename, pdf_bytes)
+                        print(f"[ZIP] Added: {filename}")
                         bundle = get_bundle_for_document(doc_type)
                         for static_key in bundle:
                             if static_key not in static_docs_added:
@@ -630,6 +659,7 @@ def download_all_zip():
                                 if static_bytes:
                                     zf.writestr(display_name, static_bytes)
                                     static_docs_added.add(static_key)
+                                    print(f"[ZIP] Added static: {display_name}")
                 except Exception as e:
                     print(f"Error processing {doc_type}: {str(e)}")
                     continue
@@ -638,6 +668,93 @@ def download_all_zip():
                         download_name=f'documents_persoproject_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip')
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# ============== MAIN ==============
+@app.route('/test-zip', methods=['GET'])
+def test_zip():
+    """Test endpoint — generates ZIP with all docs using fake data. No JS needed."""
+    fake = {
+        'nom_societe':'Test SPRL', 'forme_juridique':'SRL',
+        'num_entreprise':'BE 0123.456.789', 'num_tva':'BE0123456789',
+        'num_onss':'0123456-78', 'telephone_gsm':'+32 2 123 45 67',
+        'email':'test@testsprl.be',
+        'adresse_siege_social_1':'Rue de la Loi 123', 'adresse_siege_social_2':'1000 Bruxelles',
+        'adresse_exploitation_1':'Rue de la Loi 123', 'adresse_exploitation_2':'1000 Bruxelles',
+        'nom_prenom_gerant':'Jean Dupont', 'niss_gerant':'85.01.15-123.45',
+        'qualite':'Gérant', 'recu_par':'Bureau',
+        'assurance_loi':'AXA', 'seppt':'Mensura', 'secteur_activite':'IT',
+        'reduction_premier':'Oui', 'commission_paritaire':'CP 200',
+        'indice_onss':'218.00', 'code_nace':'62.010', 'salaire_garanti':'NON',
+        'regime_horaire':'38',
+        'lundi_matin_de':'08:00','lundi_matin_a':'12:00','lundi_pause_de':'12:00','lundi_pause_a':'13:00','lundi_apres_de':'13:00','lundi_apres_a':'17:00',
+        'mardi_matin_de':'08:00','mardi_matin_a':'12:00','mardi_pause_de':'12:00','mardi_pause_a':'13:00','mardi_apres_de':'13:00','mardi_apres_a':'17:00',
+        'mercredi_matin_de':'08:00','mercredi_matin_a':'12:00','mercredi_pause_de':'12:00','mercredi_pause_a':'13:00','mercredi_apres_de':'13:00','mercredi_apres_a':'17:00',
+        'jeudi_matin_de':'08:00','jeudi_matin_a':'12:00','jeudi_pause_de':'12:00','jeudi_pause_a':'13:00','jeudi_apres_de':'13:00','jeudi_apres_a':'17:00',
+        'vendredi_matin_de':'08:00','vendredi_matin_a':'12:00','vendredi_pause_de':'12:00','vendredi_pause_a':'13:00','vendredi_apres_de':'13:00','vendredi_apres_a':'17:00',
+        'cameras':'2 caméras entrée', 'trousse_secours':'Bureau accueil',
+        'vetements_fourniture':'Oui', 'vetements_entretien':'Non',
+        'primes':'Prime nuit 25%', 'secretariat_actuel':'Aucun',
+        'nom_comptable':'Pierre Martin', 'coord_comptable':'pierre@compta.be',
+        'origine':'Internet', 'civilite':'Mr', 'nom_prenom':'Marie Dubois',
+        'adresse_1':'Rue Example 456', 'adresse_2':'1050 Ixelles',
+        'date_lieu_naissance':'01/01/1990 à Bruxelles', 'niss':'90.01.01-123.45',
+        'nationalite':'Belge', 'carte_identite':True, 'etat_civil':'Celibataire',
+        'nb_enfants':'0', 'nb_handicapes':'0', 'date_entree':'01/01/2026',
+        'categorie':'Employe', 'fonction':'Développeur', 'type_contrat':'CDI',
+        'horaire_type':'Fixe', 'heures_semaine':'38', 'remuneration':'3000 EUR brut/mois',
+        'compte_bancaire':'BE12 3456 7890 1234', 'nom_employeur':'Test SPRL',
+        'date_signature':'25/03/2026', 'nom_soussigne':'Jean Dupont',
+        'depuis_date':'01/01/2026', 'checkbox_10pct':True,
+        'etabli_lieu':'Bruxelles', 'etabli_date':'25/03/2026',
+        'societe':'Test SPRL', 'denomination':'Test SPRL',
+        'rue':'Rue de la Loi', 'numero':'123', 'code_postal':'1000',
+        'commune':'Bruxelles', 'pays':'Belgique', 'num_affiliation_employeur':'0123456',
+        'trimestre_debut':'1/2026', 'trimestre_fin':'4/2026',
+        'niss_mandant':'85.01.15-123.45', 'nom_mandant':'Jean Dupont',
+        'nom_entreprise':'Test SPRL', 'siege_social_1':'Rue de la Loi 123',
+        'siege_social_2':'1000 Bruxelles', 'siege_exploitation':'Rue de la Loi 123',
+        'telephone':'+32 2 123 45 67', 'gsm':'+32 470 12 34 56',
+        'tva_bce':'BE0123456789', 'nb_travailleurs':'5',
+        'date_cours':'01/03/2026', 'fait_lieu':'Bruxelles', 'fait_date':'25/03/2026',
+        'nom_delegue':'Jean Dupont', 'represente_par':'Jean Dupont',
+        'date_entree_jour':'01', 'date_entree_mois':'janvier', 'date_entree_annee':'2026',
+        'date_fait':'25/03/2026',
+        'domicile_1':'Rue de la Loi 123', 'domicile_2':'1000 Bruxelles',
+        'etablie_1':'Rue de la Loi 123', 'etablie_2':'1000 Bruxelles',
+    }
+    lang_prefs = {'seppt':'fr','accident':'fr','offre':'fr'}
+    documents = ['employer','travailleur','independant','seppt','accident','dispense','procuration','mensura','offre']
+    FILENAMES = {
+        'employer':'Fiche_employeur.pdf','travailleur':'Fiche_travailleur.pdf',
+        'independant':'Fiche_independant.pdf','dispense':'Dispense_precompte.pdf',
+        'procuration':'Procuration_ONSS.pdf','mensura':'Contrat_Mensura.pdf',
+    }
+    zip_buffer = io.BytesIO()
+    static_docs_added = set()
+    errors = []
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for doc_type in documents:
+            try:
+                pdf_bytes = generate_pdf_bytes(doc_type, fake, lang_prefs)
+                if pdf_bytes:
+                    if doc_type == 'offre': filename = 'Offre_de_collaboration_FR.pdf'
+                    elif doc_type in ['accident','att_accident']: filename = 'Attestation_accident_travail_FR.pdf'
+                    elif doc_type in ['seppt','att_seppt']: filename = 'Attestation_SEPPT_FR.pdf'
+                    else: filename = FILENAMES.get(doc_type, f'{doc_type}.pdf')
+                    zf.writestr(filename, pdf_bytes)
+                    for static_key in get_bundle_for_document(doc_type):
+                        if static_key not in static_docs_added:
+                            static_bytes, display_name = get_static_document_bytes(static_key)
+                            if static_bytes:
+                                zf.writestr(display_name, static_bytes)
+                                static_docs_added.add(static_key)
+            except Exception as e:
+                errors.append(f'{doc_type}: {str(e)}')
+    if errors:
+        print('TEST ZIP ERRORS:', errors)
+    zip_buffer.seek(0)
+    return send_file(zip_buffer, mimetype='application/zip', as_attachment=True,
+                    download_name='test_tous_docs_persoproject.zip')
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
