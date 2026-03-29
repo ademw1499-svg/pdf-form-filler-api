@@ -622,6 +622,26 @@ def generate_pdf_bytes(doc_type, data, lang_prefs=None):
     return None
 
 # ============== ZIP ENDPOINT ==============
+@app.route('/debug-request', methods=['POST'])
+def debug_request():
+    """Capture exactement ce que le frontend envoie."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No JSON body"}), 400
+    documents = data.get('documents', [])
+    form_data = data.get('form_data', {})
+    lang_prefs = data.get('language_prefs', {})
+    results = {}
+    for doc in documents:
+        pdf = generate_pdf_bytes(doc, form_data, lang_prefs)
+        results[doc] = 'OK - ' + str(round(len(pdf)/1024, 1)) + ' KB' if pdf else 'NULL - doc_type inconnu ou erreur'
+    return jsonify({
+        "documents_reçus": documents,
+        "language_prefs": lang_prefs,
+        "form_data_keys": list(form_data.keys()),
+        "résultats_generation": results
+    })
+
 @app.route('/download-all-zip', methods=['POST'])
 def download_all_zip():
     try:
