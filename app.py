@@ -17,13 +17,13 @@ TEMPLATES = {
     'independant': 'FICHE_RENSEIGNEMENTS_INDEPENDANT.pdf',
     'att_accident_fr': 'ATTESTATION_ASSURANCE_ACCIDENT_DE_TRAVAIL.pdf',
     'att_seppt_fr': 'ATTESTATION_SEPPT.pdf',
-    'dispense': 'Dispense_partielle_de_versement_du_pre_compte_professionnel.pdf',
+    'dispense': 'Dispense_partielle_de_versement_du_precompte_professionnel.pdf',
     'mensura': 'FOR140106_FR.pdf',
     'procuration': 'PROCURATION.pdf',
     'offre_fr': 'Offre_de_collaboration_FR_2025-2026.pdf',
-    'offre_nl': '2025 Offre de collaboration FR 2025-2026_trad.pdf',
-    'att_accident_nl': 'ATTESTATION ASSURANCE ACCIDENT DE TRAVAIL_trad.pdf',
-    'att_seppt_nl': 'ATTESTATION SEPPT_trad.pdf',
+    'offre_nl': 'Offre_de_collaboration_NL_2025-2026.pdf',
+    'att_accident_nl': 'Attestation_accident_travail_NL.pdf',
+    'att_seppt_nl': 'Attestation_SEPPT_NL.pdf',
 }
 
 # ============== STATIC DOCUMENTS ==============
@@ -685,6 +685,59 @@ def debug_offre_raw():
     return send_file(tpl, mimetype='application/pdf',
                     as_attachment=True,
                     download_name=f'offre_template_brut_{lang}_{nb}pages.pdf')
+
+@app.route('/debug-each', methods=['GET'])
+def debug_each():
+    """Teste chaque doc individuellement, retourne JSON avec status + erreur."""
+    fake = {
+        'nom_societe':'Test SPRL', 'forme_juridique':'SRL',
+        'num_entreprise':'BE 0123.456.789', 'num_tva':'BE0123456789',
+        'num_onss':'0123456-78', 'telephone_gsm':'+32 2 123 45 67',
+        'email':'test@testsprl.be',
+        'adresse_siege_social_1':'Rue de la Loi 123', 'adresse_siege_social_2':'1000 Bruxelles',
+        'adresse_exploitation_1':'Rue de la Loi 123', 'adresse_exploitation_2':'1000 Bruxelles',
+        'nom_prenom_gerant':'Jean Dupont', 'niss_gerant':'85.01.15-123.45',
+        'qualite':'Gérant', 'recu_par':'Bureau', 'assurance_loi':'AXA',
+        'secteur_activite':'IT', 'reduction_premier':'Oui', 'commission_paritaire':'CP 200',
+        'indice_onss':'218.00', 'code_nace':'62.010', 'salaire_garanti':'NON',
+        'regime_horaire':'38',
+        'lundi_matin_de':'08:00','lundi_matin_a':'12:00','lundi_apres_de':'13:00','lundi_apres_a':'17:00',
+        'civilite':'Mr', 'nom_prenom':'Marie Dubois', 'adresse_1':'Rue Test 1', 'adresse_2':'1000 BXL',
+        'date_lieu_naissance':'01/01/1990', 'niss':'90.01.01-123.45', 'nationalite':'Belge',
+        'etat_civil':'Celibataire', 'nb_enfants':'0', 'date_entree':'01/01/2026',
+        'categorie':'Employe', 'fonction':'Dev', 'type_contrat':'CDI',
+        'horaire_type':'Fixe', 'heures_semaine':'38', 'remuneration':'3000',
+        'compte_bancaire':'BE12 3456 7890 1234', 'nom_employeur':'Test SPRL',
+        'date_signature':'25/03/2026', 'nom_soussigne':'Jean Dupont',
+        'depuis_date':'01/01/2026', 'checkbox_10pct':True,
+        'etabli_lieu':'Bruxelles', 'etabli_date':'25/03/2026',
+        'societe':'Test SPRL', 'denomination':'Test SPRL',
+        'rue':'Rue Test', 'numero':'1', 'code_postal':'1000', 'commune':'Bruxelles', 'pays':'Belgique',
+        'num_affiliation_employeur':'0123456', 'trimestre_debut':'1/2026', 'trimestre_fin':'4/2026',
+        'niss_mandant':'85.01.15-123.45', 'nom_mandant':'Jean Dupont',
+        'nom_entreprise':'Test SPRL', 'siege_social_1':'Rue Test 1', 'siege_social_2':'1000 BXL',
+        'siege_exploitation':'Rue Test 1', 'telephone':'+32 2 123 45 67', 'gsm':'+32 470 12 34 56',
+        'tva_bce':'BE0123456789', 'nb_travailleurs':'5',
+        'date_cours':'01/03/2026', 'fait_lieu':'Bruxelles', 'fait_date':'25/03/2026',
+        'nom_delegue':'Jean Dupont', 'represente_par':'Jean Dupont',
+        'date_entree_jour':'01', 'date_entree_mois':'janvier', 'date_entree_annee':'2026',
+        'date_fait':'25/03/2026', 'domicile_1':'Rue Test 1', 'domicile_2':'1000 BXL',
+        'etablie_1':'Rue Test 1', 'etablie_2':'1000 BXL',
+    }
+    lang_prefs = {'seppt':'fr','accident':'fr','offre':'fr'}
+    docs = ['employer','travailleur','independant','seppt','accident','dispense','procuration','mensura','offre']
+    results = {}
+    for doc in docs:
+        try:
+            pdf_bytes = generate_pdf_bytes(doc, fake, lang_prefs)
+            if pdf_bytes:
+                results[doc] = {'status':'OK', 'size_kb': round(len(pdf_bytes)/1024, 1)}
+            else:
+                results[doc] = {'status':'ERROR', 'error': 'generate_pdf_bytes returned None'}
+        except Exception as e:
+            import traceback
+            results[doc] = {'status':'ERROR', 'error': str(e), 'trace': traceback.format_exc()[-500:]}
+    return jsonify(results)
 
 @app.route('/test-zip', methods=['GET'])
 def test_zip():
