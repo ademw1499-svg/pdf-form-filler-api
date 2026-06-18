@@ -65,6 +65,11 @@ def merge(tpl, pkt, npg=1):
     wr = PdfWriter()
     for i in range(len(rd.pages)):
         pg = rd.pages[i]
+        # Si le template est tourné (ex: PROCURATION.pdf en paysage /Rotate 270),
+        # on "remet la page droite" avant de fusionner, sinon le texte de l'overlay
+        # (dessiné en portrait 595x842) atterrit hors de la zone visible.
+        if pg.get('/Rotate'):
+            pg.transfer_rotation_to_content()
         if i < len(ov.pages):
             pg.merge_page(ov.pages[i])
         wr.add_page(pg)
