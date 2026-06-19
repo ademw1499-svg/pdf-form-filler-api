@@ -6,6 +6,7 @@ import io
 import os
 import re
 import zipfile
+import requests
 from datetime import datetime
 
 app = Flask(__name__)
@@ -121,6 +122,47 @@ def with_signatory_fallbacks(d):
     if not d.get('etablie_1'): d['etablie_1'] = d.get('adresse_siege_social_1') or ''
     if not d.get('etablie_2'): d['etablie_2'] = d.get('adresse_siege_social_2') or ''
     return d
+
+# ============== PERSISTANCE SUPABASE ==============
+# Connexion lue depuis les variables d'environnement (Railway) — JAMAIS en dur,
+# car le repo est public. Si non configuré, la sauvegarde est ignorée silencieusement
+# (la génération des PDF continue de marcher normalement).
+SUPABASE_URL = (os.environ.get('SUPABASE_URL') or '').rstrip('/')
+SUPABASE_KEY = os.environ.get('SUPABASE_SERVICE_KEY') or os.environ.get('SUPABASE_KEY')
+
+def save_employeur(form_data):
+    """Enregistre/met à jour un employeur dans Supabase (upsert sur num_entreprise).
+    Ne lève jamais d'erreur : un échec de sauvegarde ne doit pas casser la génération."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return  # Supabase pas encore configuré
+    num = (str(form_data.get('num_entreprise') or '')).strip()
+    if not num:
+        print("[SUPABASE] pas de num_entreprise -> employeur non sauvegardé")
+        return
+    try:
+        row = {
+            'num_entreprise': num,
+            'nom_societe': form_data.get('nom_societe') or '',
+            'email': form_data.get('email') or '',
+            'data': form_data,
+            'updated_at': datetime.now().isoformat(),
+        }
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/employeurs?on_conflict=num_entreprise",
+            headers={
+                'apikey': SUPABASE_KEY,
+                'Authorization': f'Bearer {SUPABASE_KEY}',
+                'Content-Type': 'application/json',
+                'Prefer': 'resolution=merge-duplicates,return=minimal',
+            },
+            json=row, timeout=10,
+        )
+        if r.status_code >= 300:
+            print(f"[SUPABASE] échec sauvegarde {r.status_code}: {r.text[:200]}")
+        else:
+            print(f"[SUPABASE] employeur sauvegardé: {num}")
+    except Exception as e:
+        print(f"[SUPABASE] erreur: {e}")
 
 # ============== HEALTH & DEBUG ==============
 @app.route('/health', methods=['GET'])
@@ -690,6 +732,8 @@ def download_all_zip():
         form_data = data.get('form_data', {})
         language_prefs = data.get('language_prefs', {})
         if not documents: return jsonify({"error": "No documents selected"}), 400
+        # Étape 2A : on mémorise l'employeur (sans bloquer la génération si ça échoue)
+        save_employeur(form_data)
         zip_buffer = io.BytesIO()
         static_docs_added = set()
         FILENAMES = {
