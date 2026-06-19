@@ -4,6 +4,7 @@ from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 import io
 import os
+import re
 import zipfile
 from datetime import datetime
 
@@ -50,9 +51,16 @@ SCALE_X, SCALE_Y = 595/707, 842/1000
 def cvt(x, y):
     return (x * SCALE_X, 842 - (y * SCALE_Y))
 
+_ISO_DATE = re.compile(r'^(\d{4})-(\d{2})-(\d{2})$')
 def txt(c, t, x, y, s=10):
+    t = str(t)
+    # Filet de sécurité : le frontend envoie parfois la date brute AAAA-MM-JJ
+    # (input HTML date) au lieu de JJ/MM/AAAA. On la remet à l'endroit.
+    m = _ISO_DATE.match(t)
+    if m:
+        t = f'{m.group(3)}/{m.group(2)}/{m.group(1)}'
     c.setFont("Helvetica", s)
-    c.drawString(*cvt(x, y), str(t))
+    c.drawString(*cvt(x, y), t)
 
 def newcan():
     p = io.BytesIO()
@@ -101,6 +109,18 @@ def normalize_documents(documents):
         if 'offre' not in documents:
             documents.append('offre')
     return documents
+
+def with_signatory_fallbacks(d):
+    """Filet de sécurité : le frontend écrase parfois nom_soussigne / domicile /
+    etablie par du vide (bug d'assemblage des données). On les reconstitue depuis
+    le nom du gérant et l'adresse du siège social, présents dans les données."""
+    d = dict(d)
+    if not d.get('nom_soussigne'): d['nom_soussigne'] = d.get('nom_prenom_gerant') or ''
+    if not d.get('domicile_1'): d['domicile_1'] = d.get('adresse_siege_social_1') or ''
+    if not d.get('domicile_2'): d['domicile_2'] = d.get('adresse_siege_social_2') or ''
+    if not d.get('etablie_1'): d['etablie_1'] = d.get('adresse_siege_social_1') or ''
+    if not d.get('etablie_2'): d['etablie_2'] = d.get('adresse_siege_social_2') or ''
+    return d
 
 # ============== HEALTH & DEBUG ==============
 @app.route('/health', methods=['GET'])
@@ -438,6 +458,7 @@ def fill_independant_pdf(d):
     return merge(TEMPLATES['independant'], p, 1).getvalue()
 
 def fill_att_accident_pdf(d, lang='fr'):
+    d = with_signatory_fallbacks(d)
     p, c = newcan()
     tpl = TEMPLATES['att_accident_nl'] if lang == 'nl' else TEMPLATES['att_accident_fr']
     off = 12 if lang == 'nl' else 0
@@ -454,6 +475,7 @@ def fill_att_accident_pdf(d, lang='fr'):
     return merge(tpl, p, 1).getvalue()
 
 def fill_att_seppt_pdf(d, lang='fr'):
+    d = with_signatory_fallbacks(d)
     p, c = newcan()
     tpl = TEMPLATES['att_seppt_nl'] if lang == 'nl' else TEMPLATES['att_seppt_fr']
     off = 11 if lang == 'nl' else 0
@@ -587,6 +609,7 @@ def fill_procuration_pdf(d):
     return merge(TEMPLATES['procuration'], p, 1).getvalue()
 
 def fill_dispense_pdf(d):
+    d = with_signatory_fallbacks(d)
     p, c = newcan()
     if d.get('nom_soussigne'): txt(c, d['nom_soussigne'], 334, 188)
     if d.get('qualite'): txt(c, d['qualite'], 255, 206)
