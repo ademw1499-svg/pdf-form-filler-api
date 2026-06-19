@@ -197,11 +197,34 @@ def debug_config():
 def _supabase_headers():
     return {'apikey': SUPABASE_KEY, 'Authorization': f'Bearer {SUPABASE_KEY}'}
 
+def verify_user_token(req):
+    """Vérifie le token Supabase de l'utilisateur connecté (login gestionnaire).
+    Le frontend envoie 'Authorization: Bearer <access_token>'. On le valide
+    auprès de Supabase Auth. Retourne True si l'utilisateur est authentifié."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return False
+    auth = req.headers.get('Authorization', '')
+    if not auth.startswith('Bearer '):
+        return False
+    token = auth.split(' ', 1)[1].strip()
+    if not token:
+        return False
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={'apikey': SUPABASE_KEY, 'Authorization': f'Bearer {token}'},
+            timeout=10)
+        return r.status_code == 200
+    except Exception:
+        return False
+
 @app.route('/employeurs', methods=['GET'])
 def list_employeurs():
     """Liste/recherche les employeurs enregistrés (pour le portail)."""
     if not SUPABASE_URL or not SUPABASE_KEY:
         return jsonify({"error": "Supabase non configuré"}), 503
+    if not verify_user_token(request):
+        return jsonify({"error": "Non authentifié"}), 401
     q = (request.args.get('q') or '').strip().lower()
     try:
         r = requests.get(
@@ -222,6 +245,8 @@ def get_employeur(num):
     """Récupère un employeur complet (avec toutes ses données) pour pré-remplir."""
     if not SUPABASE_URL or not SUPABASE_KEY:
         return jsonify({"error": "Supabase non configuré"}), 503
+    if not verify_user_token(request):
+        return jsonify({"error": "Non authentifié"}), 401
     try:
         import urllib.parse
         nq = urllib.parse.quote(num)
