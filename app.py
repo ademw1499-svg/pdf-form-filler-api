@@ -193,6 +193,48 @@ def debug_config():
         "document_bundles": DOCUMENT_BUNDLES, "supported_languages": ["fr", "nl"]
     })
 
+# ============== LECTURE EMPLOYEURS (pour le portail) ==============
+def _supabase_headers():
+    return {'apikey': SUPABASE_KEY, 'Authorization': f'Bearer {SUPABASE_KEY}'}
+
+@app.route('/employeurs', methods=['GET'])
+def list_employeurs():
+    """Liste/recherche les employeurs enregistrés (pour le portail)."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    q = (request.args.get('q') or '').strip().lower()
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/employeurs"
+            "?select=num_entreprise,nom_societe,email,updated_at&order=updated_at.desc&limit=500",
+            headers=_supabase_headers(), timeout=10)
+        rows = r.json() if r.status_code < 300 else []
+        if q:
+            rows = [x for x in rows
+                    if q in (x.get('nom_societe') or '').lower()
+                    or q in (x.get('num_entreprise') or '').lower()]
+        return jsonify(rows[:50]), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/employeurs/<path:num>', methods=['GET'])
+def get_employeur(num):
+    """Récupère un employeur complet (avec toutes ses données) pour pré-remplir."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    try:
+        import urllib.parse
+        nq = urllib.parse.quote(num)
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/employeurs?num_entreprise=eq.{nq}&select=*&limit=1",
+            headers=_supabase_headers(), timeout=10)
+        rows = r.json() if r.status_code < 300 else []
+        if not rows:
+            return jsonify({"error": "Employeur introuvable"}), 404
+        return jsonify(rows[0]), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # ============== INDIVIDUAL ENDPOINTS ==============
 @app.route('/fill-employer-form', methods=['POST'])
 def fill_employer():
