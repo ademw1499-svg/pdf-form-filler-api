@@ -91,6 +91,17 @@ def get_static_document_bytes(doc_key):
 def get_bundle_for_document(doc_type):
     return DOCUMENT_BUNDLES.get(doc_type, [])
 
+# Compat frontend : pour l'Offre en FR, le frontend envoie 4 morceaux
+# (offre1, offre2, offre3, offre4) alors que le backend génère l'Offre en un
+# seul document de 20 pages. On regroupe ces morceaux en un unique 'offre'.
+OFFRE_PARTS = {'offre1', 'offre2', 'offre3', 'offre4'}
+def normalize_documents(documents):
+    if any(d in OFFRE_PARTS for d in documents):
+        documents = [d for d in documents if d not in OFFRE_PARTS]
+        if 'offre' not in documents:
+            documents.append('offre')
+    return documents
+
 # ============== HEALTH & DEBUG ==============
 @app.route('/health', methods=['GET'])
 def health():
@@ -633,7 +644,7 @@ def debug_request():
     data = request.get_json()
     if not data:
         return jsonify({"error": "No JSON body"}), 400
-    documents = data.get('documents', [])
+    documents = normalize_documents(data.get('documents', []))
     form_data = data.get('form_data', {})
     lang_prefs = data.get('language_prefs', {})
     results = {}
@@ -652,7 +663,7 @@ def download_all_zip():
     try:
         data = request.get_json()
         if not data: return jsonify({"error": "No data provided"}), 400
-        documents = data.get('documents', [])
+        documents = normalize_documents(data.get('documents', []))
         form_data = data.get('form_data', {})
         language_prefs = data.get('language_prefs', {})
         if not documents: return jsonify({"error": "No documents selected"}), 400
