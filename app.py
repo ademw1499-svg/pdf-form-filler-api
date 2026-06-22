@@ -260,6 +260,47 @@ def get_employeur(num):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ============== ÉTAT DE PRESTATIONS (parser) ==============
+def parse_etat_prestation(reader):
+    """Lit un état de prestation Prisma (PDF texte) -> client, période, travailleurs."""
+    lines = []
+    for pg in reader.pages:
+        lines += [l.rstrip() for l in (pg.extract_text() or '').splitlines()]
+    full = "\n".join(lines)
+    client = lines[1].strip() if len(lines) > 1 else ""
+    onss = (re.search(r"No ONSS:\s*([\d-]+)", full) or [None, ""])[1]
+    per = re.search(r"(\d{2}/\d{2}/\d{4})\s*jusqu'au\s*(\d{2}/\d{2}/\d{4})", full)
+    periode = {"debut": per.group(1), "fin": per.group(2)} if per else {}
+    workers = []
+    for i, l in enumerate(lines):
+        m = re.match(r"^(\d{4,5})([A-ZÀ-Ÿ][^\d].*)$", l)
+        # un vrai travailleur : la ligne suivante commence par "No.rég.nat"
+        if not m or i + 1 >= len(lines) or not lines[i + 1].lstrip().startswith("No.rég.nat"):
+            continue
+        bloc = "\n".join(lines[i:i + 15])
+        reg = re.search(r"No\.rég\.nat\.:\s*([\d.]+\s+\d{3}-\d{2})(\d+,\d{2})?", lines[i + 1])
+        regime = re.search(r"Mois\s+(\d+)", bloc)
+        entree = re.search(r"(\d{2}/\d{2}/\d{4})", "\n".join(lines[i + 2:i + 15]))
+        workers.append({
+            "matricule": m.group(1), "nom": m.group(2).strip(),
+            "niss": reg.group(1) if reg else "",
+            "heures_jour": (reg.group(2) if reg and reg.group(2) else ""),
+            "regime": regime.group(1) if regime else "",
+            "date_entree": entree.group(1) if entree else "",
+        })
+    return {"client": client, "onss": onss, "periode": periode, "travailleurs": workers}
+
+@app.route('/parse-prestations', methods=['POST'])
+def parse_prestations():
+    """Reçoit l'état Prisma (PDF) et renvoie les données structurées pour la grille."""
+    f = request.files.get('file')
+    if not f:
+        return jsonify({"error": "Aucun fichier"}), 400
+    try:
+        return jsonify(parse_etat_prestation(PdfReader(f))), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # ============== INDIVIDUAL ENDPOINTS ==============
 @app.route('/fill-employer-form', methods=['POST'])
 def fill_employer():
