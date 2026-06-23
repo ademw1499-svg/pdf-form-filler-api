@@ -269,6 +269,9 @@ def parse_etat_prestation(reader):
     full = "\n".join(lines)
     client = lines[1].strip() if len(lines) > 1 else ""
     onss = (re.search(r"No ONSS:\s*([\d-]+)", full) or [None, ""])[1]
+    # Numéro d'employeur Prisma : 1re ligne type "0012/002586" -> 2586
+    mnum = re.search(r"^\s*\d+/0*(\d+)", lines[0]) if lines else None
+    numero_employeur = mnum.group(1) if mnum else ""
     per = re.search(r"(\d{2}/\d{2}/\d{4})\s*jusqu'au\s*(\d{2}/\d{2}/\d{4})", full)
     periode = {"debut": per.group(1), "fin": per.group(2)} if per else {}
     workers = []
@@ -288,7 +291,7 @@ def parse_etat_prestation(reader):
             "regime": regime.group(1) if regime else "",
             "date_entree": entree.group(1) if entree else "",
         })
-    return {"client": client, "onss": onss, "periode": periode, "travailleurs": workers}
+    return {"client": client, "onss": onss, "numero_employeur": numero_employeur, "periode": periode, "travailleurs": workers}
 
 @app.route('/parse-prestations', methods=['POST'])
 def parse_prestations():
@@ -298,6 +301,97 @@ def parse_prestations():
         return jsonify({"error": "Aucun fichier"}), 400
     try:
         return jsonify(parse_etat_prestation(PdfReader(f))), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ============== PRESTATIONS -> PRISMA (pont avec l'automatisation Mode D) ==============
+# Correspondance codes portail -> codes paie Prisma.
+# ⚠️ À VALIDER avec la conseillère juridique (notamment maladie ouvrier 301 vs employé 305).
+PORTAIL_VERS_PRISMA = {
+    'P':  '0001',   # presté
+    'JF': '0100',   # jour férié payé
+    'VA': '200',    # vacances légales
+    'M':  '305',    # maladie (employé) — ⚠️ ouvrier = 301
+    'AB': '651',    # absence non payée / congé sans solde
+}
+
+def _heures_float(h):
+    try:
+        return round(float(str(h).replace(',', '.')), 2)
+    except Exception:
+        return 0.0
+
+def construire_etats(travailleurs):
+    """travailleurs = { "NOM": { "jour": [ {code, h}, ... ] } }
+    -> ETATS Mode D = { "NOM": { jour(str): {"code": <prisma>, "heures": float} } }.
+    v1 : on prend le 1er segment du jour (le départage multi-codes sera étendu plus tard)."""
+    etats = {}
+    for nom, jours in (travailleurs or {}).items():
+        plan = {}
+        for jour, segs in (jours or {}).items():
+            if not segs:
+                continue
+            seg = segs[0]
+            pc = seg.get('code')
+            code = PORTAIL_VERS_PRISMA.get(pc, '0001' if pc not in PORTAIL_VERS_PRISMA else pc)
+            plan[str(int(jour))] = {"code": code, "heures": _heures_float(seg.get('h'))}
+        if plan:
+            etats[nom] = plan
+    return etats
+
+@app.route('/prestations', methods=['POST'])
+def save_prestations():
+    """Le portail enregistre les prestations validées (gestionnaire connecté)."""
+    if not verify_user_token(request):
+        return jsonify({"error": "Non authentifié"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    d = request.get_json() or {}
+    employeur = str(d.get('employeur') or '').strip()
+    periode = str(d.get('periode') or '').strip()
+    if not employeur or not periode:
+        return jsonify({"error": "employeur et periode requis"}), 400
+    etats = construire_etats(d.get('travailleurs') or {})
+    row = {
+        'employeur': employeur, 'periode': periode,
+        'client_nom': d.get('client') or '', 'etats': etats,
+        'updated_at': datetime.now().isoformat(),
+    }
+    try:
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/prestations?on_conflict=employeur,periode",
+            headers={**_supabase_headers(), 'Content-Type': 'application/json',
+                     'Prefer': 'resolution=merge-duplicates,return=minimal'},
+            json=row, timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": f"Supabase {r.status_code}: {r.text[:200]}"}), 500
+        return jsonify({"ok": True, "employeur": employeur, "periode": periode, "travailleurs": len(etats)}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/prestations', methods=['GET'])
+def get_prestations():
+    """Lu par le serveur Windows (Mode D). Protégé par un token partagé (env PRESTATIONS_TOKEN)."""
+    token_attendu = os.environ.get('PRESTATIONS_TOKEN')
+    if not token_attendu:
+        return jsonify({"error": "PRESTATIONS_TOKEN non configuré"}), 503
+    if request.headers.get('X-Prestations-Token') != token_attendu:
+        return jsonify({"error": "Non autorisé"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    employeur = (request.args.get('employeur') or '').strip()
+    periode = (request.args.get('periode') or '').strip()
+    if not employeur or not periode:
+        return jsonify({"error": "employeur et periode requis"}), 400
+    try:
+        import urllib.parse
+        q = (f"employeur=eq.{urllib.parse.quote(employeur)}"
+             f"&periode=eq.{urllib.parse.quote(periode)}&select=*&limit=1")
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/prestations?{q}", headers=_supabase_headers(), timeout=10)
+        rows = r.json() if r.status_code < 300 else []
+        if not rows:
+            return jsonify({"error": "Aucune prestation trouvée pour cet employeur/période"}), 404
+        return jsonify(rows[0]), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
