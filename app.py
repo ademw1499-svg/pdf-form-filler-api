@@ -355,6 +355,7 @@ def save_prestations():
     row = {
         'employeur': employeur, 'periode': periode,
         'client_nom': d.get('client') or '', 'etats': etats,
+        'statut': 'a_traiter',  # le veilleur (PC Prisma) traitera puis passera 'traite'
         'updated_at': datetime.now().isoformat(),
     }
     try:
@@ -392,6 +393,58 @@ def get_prestations():
         if not rows:
             return jsonify({"error": "Aucune prestation trouvée pour cet employeur/période"}), 404
         return jsonify(rows[0]), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/prestations/a-traiter', methods=['GET'])
+def prestations_a_traiter():
+    """Lu en boucle par le veilleur (PC Prisma) : liste les prestations validees
+    pas encore encodees. Protege par le token partage (PRESTATIONS_TOKEN)."""
+    token_attendu = os.environ.get('PRESTATIONS_TOKEN')
+    if not token_attendu:
+        return jsonify({"error": "PRESTATIONS_TOKEN non configuré"}), 503
+    if request.headers.get('X-Prestations-Token') != token_attendu:
+        return jsonify({"error": "Non autorisé"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    try:
+        q = "statut=eq.a_traiter&select=*&order=updated_at.asc"
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/prestations?{q}", headers=_supabase_headers(), timeout=10)
+        rows = r.json() if r.status_code < 300 else []
+        return jsonify(rows if isinstance(rows, list) else []), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/prestations/traite', methods=['POST'])
+def prestations_marquer_traite():
+    """Le veilleur marque une prestation comme traitee (ou en erreur) apres encodage.
+    Protege par le token partage (PRESTATIONS_TOKEN)."""
+    token_attendu = os.environ.get('PRESTATIONS_TOKEN')
+    if not token_attendu:
+        return jsonify({"error": "PRESTATIONS_TOKEN non configuré"}), 503
+    if request.headers.get('X-Prestations-Token') != token_attendu:
+        return jsonify({"error": "Non autorisé"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    d = request.get_json() or {}
+    employeur = str(d.get('employeur') or '').strip()
+    periode = str(d.get('periode') or '').strip()
+    statut = str(d.get('statut') or 'traite').strip()
+    if statut not in ('traite', 'erreur', 'a_traiter'):
+        statut = 'traite'
+    if not employeur or not periode:
+        return jsonify({"error": "employeur et periode requis"}), 400
+    try:
+        import urllib.parse
+        q = (f"employeur=eq.{urllib.parse.quote(employeur)}"
+             f"&periode=eq.{urllib.parse.quote(periode)}")
+        r = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/prestations?{q}",
+            headers={**_supabase_headers(), 'Content-Type': 'application/json', 'Prefer': 'return=minimal'},
+            json={'statut': statut, 'updated_at': datetime.now().isoformat()}, timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": f"Supabase {r.status_code}: {r.text[:200]}"}), 500
+        return jsonify({"ok": True, "employeur": employeur, "periode": periode, "statut": statut}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
