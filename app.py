@@ -308,11 +308,27 @@ def parse_prestations():
 # Correspondance codes portail -> codes paie Prisma.
 # ⚠️ À VALIDER avec la conseillère juridique (notamment maladie ouvrier 301 vs employé 305).
 PORTAIL_VERS_PRISMA = {
-    'P':  '0001',   # presté
-    'JF': '0100',   # jour férié payé
-    'VA': '200',    # vacances légales
-    'M':  '305',    # maladie (employé) — ⚠️ ouvrier = 301
-    'AB': '651',    # absence non payée / congé sans solde
+    # Codes validés par la conseillère juridique (questionnaire 2026-06).
+    'P':   '0001',  # presté normal
+    'HC':  '0002',  # heures complémentaires
+    'HS':  '010',   # heures supplémentaires
+    'JF':  '100',   # jour férié payé
+    'RF':  '103',   # récupération de jour férié
+    'VA':  '200',   # vacances légales
+    'VX':  '201',   # vacances extra-légales
+    'MO1': '301',   # maladie ouvrier J1-7
+    'MO2': '302',   # maladie ouvrier J8-14
+    'MO3': '303',   # maladie ouvrier J15-30
+    'MU':  '304',   # maladie après garanti (mutuelle)
+    'M':   '305',   # maladie garanti (employé)
+    'ML':  '346',   # maladie longue durée
+    'PC':  '110',   # petit chômage
+    'MAT': '351',   # maternité
+    'PAT1':'0357',  # paternité (employeur, 3j)
+    'PAT2':'0532',  # paternité (mutuelle, 17j)
+    'AB':  '651',   # absence non payée / congé sans solde
+    'INJ': '652',   # absence injustifiée
+    # À confirmer avec la juriste : Accident de travail (code Prisma manquant).
 }
 
 def _heures_float(h):
@@ -358,12 +374,23 @@ def save_prestations():
         'statut': 'a_traiter',  # le veilleur (PC Prisma) traitera puis passera 'traite'
         'updated_at': datetime.now().isoformat(),
     }
-    try:
-        r = requests.post(
+    avantages = d.get('avantages')
+    if avantages:
+        row['avantages'] = avantages  # nécessite la colonne 'avantages' (sinon repli auto ci-dessous)
+
+    def _push(payload):
+        return requests.post(
             f"{SUPABASE_URL}/rest/v1/prestations?on_conflict=employeur,periode",
             headers={**_supabase_headers(), 'Content-Type': 'application/json',
                      'Prefer': 'resolution=merge-duplicates,return=minimal'},
-            json=row, timeout=10)
+            json=payload, timeout=10)
+    try:
+        r = _push(row)
+        # Repli : si la colonne 'avantages' n'existe pas encore, on réessaie sans, pour
+        # ne jamais bloquer l'enregistrement des prestations.
+        if r.status_code >= 300 and 'avantages' in row and 'avantages' in (r.text or ''):
+            row.pop('avantages', None)
+            r = _push(row)
         if r.status_code >= 300:
             return jsonify({"error": f"Supabase {r.status_code}: {r.text[:200]}"}), 500
         return jsonify({"ok": True, "employeur": employeur, "periode": periode, "travailleurs": len(etats)}), 200
