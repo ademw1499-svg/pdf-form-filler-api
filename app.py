@@ -200,23 +200,26 @@ def _supabase_headers():
 def verify_user_token(req):
     """Vérifie le token Supabase de l'utilisateur connecté (login gestionnaire).
     Le frontend envoie 'Authorization: Bearer <access_token>'. On le valide
-    auprès de Supabase Auth. Retourne True si l'utilisateur est authentifié."""
+    auprès de Supabase Auth. Retourne l'email de l'utilisateur si valide, sinon None."""
     if not SUPABASE_URL or not SUPABASE_KEY:
-        return False
+        return None
     auth = req.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
-        return False
+        return None
     token = auth.split(' ', 1)[1].strip()
     if not token:
-        return False
+        return None
     try:
         r = requests.get(
             f"{SUPABASE_URL}/auth/v1/user",
             headers={'apikey': SUPABASE_KEY, 'Authorization': f'Bearer {token}'},
             timeout=10)
-        return r.status_code == 200
+        if r.status_code != 200:
+            return None
+        # Retourne l'email de l'utilisateur (sert de "poste de traitement" par défaut).
+        return (r.json() or {}).get('email') or 'inconnu'
     except Exception:
-        return False
+        return None
 
 @app.route('/employeurs', methods=['GET'])
 def list_employeurs():
@@ -358,7 +361,8 @@ def construire_etats(travailleurs):
 @app.route('/prestations', methods=['POST'])
 def save_prestations():
     """Le portail enregistre les prestations validées (gestionnaire connecté)."""
-    if not verify_user_token(request):
+    user_email = verify_user_token(request)
+    if not user_email:
         return jsonify({"error": "Non authentifié"}), 401
     if not SUPABASE_URL or not SUPABASE_KEY:
         return jsonify({"error": "Supabase non configuré"}), 503
@@ -368,9 +372,13 @@ def save_prestations():
     if not employeur or not periode:
         return jsonify({"error": "employeur et periode requis"}), 400
     etats = construire_etats(d.get('travailleurs') or {})
+    # Poste de traitement : par défaut le gestionnaire connecté (sa validation ne sera
+    # traitée QUE par le veilleur de SON PC). En "mode test" -> poste 'TEST' (isolé du réel).
+    poste = 'TEST' if d.get('test') else user_email
     row = {
         'employeur': employeur, 'periode': periode,
         'client_nom': d.get('client') or '', 'etats': etats,
+        'poste': poste,
         'statut': 'a_traiter',  # le veilleur (PC Prisma) traitera puis passera 'traite'
         'updated_at': datetime.now().isoformat(),
     }
@@ -380,7 +388,7 @@ def save_prestations():
 
     def _push(payload):
         return requests.post(
-            f"{SUPABASE_URL}/rest/v1/prestations?on_conflict=employeur,periode",
+            f"{SUPABASE_URL}/rest/v1/prestations?on_conflict=employeur,periode,poste",
             headers={**_supabase_headers(), 'Content-Type': 'application/json',
                      'Prefer': 'resolution=merge-duplicates,return=minimal'},
             json=payload, timeout=10)
@@ -393,7 +401,8 @@ def save_prestations():
             r = _push(row)
         if r.status_code >= 300:
             return jsonify({"error": f"Supabase {r.status_code}: {r.text[:200]}"}), 500
-        return jsonify({"ok": True, "employeur": employeur, "periode": periode, "travailleurs": len(etats)}), 200
+        return jsonify({"ok": True, "employeur": employeur, "periode": periode,
+                        "travailleurs": len(etats), "poste": poste}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -434,8 +443,14 @@ def prestations_a_traiter():
         return jsonify({"error": "Non autorisé"}), 401
     if not SUPABASE_URL or not SUPABASE_KEY:
         return jsonify({"error": "Supabase non configuré"}), 503
+    # Le veilleur indique SON poste : il ne reçoit QUE les prestations qui lui sont destinées.
+    poste = (request.args.get('poste') or '').strip()
+    if not poste:
+        return jsonify({"error": "poste requis (chaque veilleur doit s'identifier)"}), 400
     try:
-        q = "statut=eq.a_traiter&select=*&order=updated_at.asc"
+        import urllib.parse
+        q = (f"statut=eq.a_traiter&poste=eq.{urllib.parse.quote(poste)}"
+             f"&select=*&order=updated_at.asc")
         r = requests.get(f"{SUPABASE_URL}/rest/v1/prestations?{q}", headers=_supabase_headers(), timeout=10)
         rows = r.json() if r.status_code < 300 else []
         return jsonify(rows if isinstance(rows, list) else []), 200
@@ -456,15 +471,17 @@ def prestations_marquer_traite():
     d = request.get_json() or {}
     employeur = str(d.get('employeur') or '').strip()
     periode = str(d.get('periode') or '').strip()
+    poste = str(d.get('poste') or '').strip()
     statut = str(d.get('statut') or 'traite').strip()
     if statut not in ('traite', 'erreur', 'a_traiter'):
         statut = 'traite'
-    if not employeur or not periode:
-        return jsonify({"error": "employeur et periode requis"}), 400
+    if not employeur or not periode or not poste:
+        return jsonify({"error": "employeur, periode et poste requis"}), 400
     try:
         import urllib.parse
         q = (f"employeur=eq.{urllib.parse.quote(employeur)}"
-             f"&periode=eq.{urllib.parse.quote(periode)}")
+             f"&periode=eq.{urllib.parse.quote(periode)}"
+             f"&poste=eq.{urllib.parse.quote(poste)}")
         r = requests.patch(
             f"{SUPABASE_URL}/rest/v1/prestations?{q}",
             headers={**_supabase_headers(), 'Content-Type': 'application/json', 'Prefer': 'return=minimal'},
