@@ -492,6 +492,53 @@ def prestations_marquer_traite():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ============== ROSTER (mémoire des travailleurs par employeur) ==============
+@app.route('/roster', methods=['POST'])
+def save_roster():
+    """Mémorise la liste des travailleurs d'un employeur (pour la saisie manuelle
+    sans PDF). Gestionnaire connecté."""
+    if not verify_user_token(request):
+        return jsonify({"error": "Non authentifié"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    d = request.get_json() or {}
+    employeur = str(d.get('employeur') or '').strip()
+    travailleurs = d.get('travailleurs') or []
+    if not employeur or not isinstance(travailleurs, list) or not travailleurs:
+        return jsonify({"error": "employeur et travailleurs requis"}), 400
+    row = {'employeur': employeur, 'client_nom': d.get('client') or '',
+           'travailleurs': travailleurs, 'updated_at': datetime.now().isoformat()}
+    try:
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/rosters?on_conflict=employeur",
+            headers={**_supabase_headers(), 'Content-Type': 'application/json',
+                     'Prefer': 'resolution=merge-duplicates,return=minimal'},
+            json=row, timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": f"Supabase {r.status_code}: {r.text[:200]}"}), 500
+        return jsonify({"ok": True, "employeur": employeur, "travailleurs": len(travailleurs)}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/roster', methods=['GET'])
+def get_roster():
+    """Renvoie les travailleurs mémorisés d'un employeur (pour pré-remplir la saisie manuelle)."""
+    if not verify_user_token(request):
+        return jsonify({"error": "Non authentifié"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    employeur = (request.args.get('employeur') or '').strip()
+    if not employeur:
+        return jsonify({"error": "employeur requis"}), 400
+    try:
+        import urllib.parse
+        q = f"employeur=eq.{urllib.parse.quote(employeur)}&select=*&limit=1"
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/rosters?{q}", headers=_supabase_headers(), timeout=10)
+        rows = r.json() if r.status_code < 300 else []
+        return jsonify(rows[0] if rows else {"employeur": employeur, "travailleurs": []}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # ============== INDIVIDUAL ENDPOINTS ==============
 @app.route('/fill-employer-form', methods=['POST'])
 def fill_employer():
