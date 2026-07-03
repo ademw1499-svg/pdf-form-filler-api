@@ -598,7 +598,8 @@ def bce_lookup(numero):
             m = re.search(pattern + r'.*?<td[^>]*>(.*?)</td>', html, re.S)
             if not m:
                 return ''
-            return re.sub(r'<[^>]+>|\s+', ' ', m.group(1)).strip()
+            t = re.sub(r'<[^>]+>|\s+', ' ', m.group(1)).strip()
+            return t.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&#39;', chr(39))
         deno = _cell(r'D\S+nomination:')
         if deno:
             # coupe les mentions du type "Dénomination en français, depuis le ..."
@@ -608,6 +609,19 @@ def bce_lookup(numero):
         forme = _bce_forme(re.split(r'Depuis', forme_txt)[0] if forme_txt else '')
         if forme:
             out['forme_juridique'] = forme
+        # Adresse du siège (secours si VIES n'a pas répondu)
+        if not out.get('adresse_siege_social_1'):
+            m = re.search(r'Adresse du si\S+ge:?(.*?)</tr>', html, re.S)
+            if m:
+                txt = re.sub(r'<br\s*/?>', '\n', m.group(1))
+                txt = re.sub(r'<[^>]+>', ' ', txt).replace('&nbsp;', ' ')
+                lignes = [re.sub(r'\s+', ' ', l).strip() for l in txt.split('\n')]
+                lignes = [l for l in lignes if l and 'Depuis' not in l]
+                if lignes:
+                    out['adresse_siege_social_1'] = lignes[0]
+                    out['trouve'] = True
+                if len(lignes) > 1:
+                    out['adresse_siege_social_2'] = lignes[1]
     except Exception:
         pass
 
