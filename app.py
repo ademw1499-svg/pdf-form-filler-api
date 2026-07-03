@@ -539,6 +539,82 @@ def get_roster():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ============== BCE / BANQUE-CARREFOUR DES ENTREPRISES ==============
+def _bce_forme(texte):
+    """Texte 'Forme légale' BCE -> valeur du select du portail."""
+    t = (texte or '').lower()
+    if 'responsabilit' in t and 'limit' in t:
+        return 'SRL'
+    if 'anonyme' in t:
+        return 'SA'
+    if 'coop' in t:
+        return 'SC'
+    if 'sans but lucratif' in t or 'association' in t:
+        return 'ASBL'
+    if 'personne physique' in t:
+        return 'PERSONNE PHYSIQUE'
+    return ''
+
+@app.route('/bce/<numero>', methods=['GET'])
+def bce_lookup(numero):
+    """Pré-remplissage affiliation : interroge VIES (nom+adresse, JSON officiel UE)
+    et la fiche publique BCE (dénomination, forme légale). Données publiques."""
+    num = re.sub(r'\D', '', numero or '')
+    if len(num) == 9:
+        num = '0' + num
+    if len(num) != 10:
+        return jsonify({"error": "Numéro invalide — attendu 10 chiffres (ex : BE 0123.456.789)"}), 400
+    fmt = f"{num[0:4]}.{num[4:7]}.{num[7:10]}"
+    out = {"num_entreprise": f"BE {fmt}", "num_tva": f"BE {fmt}", "trouve": False}
+
+    # 1) VIES (Commission européenne) : validité + nom + adresse
+    try:
+        r = requests.get(
+            f"https://ec.europa.eu/taxation_customs/vies/rest-api/ms/BE/vat/{num}",
+            timeout=12)
+        d = r.json() if r.status_code < 300 else {}
+        if d.get('isValid'):
+            out['trouve'] = True
+            name = (d.get('name') or '').strip()
+            if name and name != '---':
+                out['nom_societe'] = name
+            addr = (d.get('address') or '').replace('\r', '')
+            lignes = [l.strip() for l in addr.split('\n') if l.strip()]
+            if lignes:
+                out['adresse_siege_social_1'] = lignes[0]
+            if len(lignes) > 1:
+                out['adresse_siege_social_2'] = ' '.join(lignes[1:])
+    except Exception:
+        pass
+
+    # 2) Fiche publique BCE : dénomination officielle + forme légale (best effort)
+    try:
+        r = requests.get(
+            "https://kbopub.economie.fgov.be/kbopub/toonondernemingps.html",
+            params={"ondernemingsnummer": num, "lang": "fr"},
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=12)
+        html = r.text if r.status_code < 300 else ''
+        def _cell(pattern):
+            m = re.search(pattern + r'.*?<td[^>]*>(.*?)</td>', html, re.S)
+            if not m:
+                return ''
+            return re.sub(r'<[^>]+>|\s+', ' ', m.group(1)).strip()
+        deno = _cell(r'D\S+nomination:')
+        if deno:
+            # coupe les mentions du type "Dénomination en français, depuis le ..."
+            out['nom_societe'] = re.split(r'\s{2,}|D\S+nomination', deno)[0].strip() or out.get('nom_societe', '')
+            out['trouve'] = True
+        forme_txt = _cell(r'Forme l\S+gale')
+        forme = _bce_forme(re.split(r'Depuis', forme_txt)[0] if forme_txt else '')
+        if forme:
+            out['forme_juridique'] = forme
+    except Exception:
+        pass
+
+    if not out['trouve']:
+        return jsonify({"error": "Numéro introuvable à la BCE / TVA non valide."}), 404
+    return jsonify(out), 200
+
 # ============== INDIVIDUAL ENDPOINTS ==============
 @app.route('/fill-employer-form', methods=['POST'])
 def fill_employer():
