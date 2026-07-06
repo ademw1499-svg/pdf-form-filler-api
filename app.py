@@ -609,6 +609,18 @@ def bce_lookup(numero):
         forme = _bce_forme(re.split(r'Depuis', forme_txt)[0] if forme_txt else '')
         if forme:
             out['forme_juridique'] = forme
+        # Code NACE + secteur d'activité (priorité ONSS -> TVA -> NACE-BEL 2008).
+        # NB : une société a souvent PLUSIEURS codes NACE ; on prend l'activité
+        # principale ONSS et le gestionnaire vérifie.
+        flat = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', html)
+                      .replace('&nbsp;', ' ').replace('&#39;', chr(39))
+                      .replace('&amp;', '&').replace('’', chr(39)))
+        for pref in (r'ONSS\s*\d{4}', r'TVA\s*\d{4}', r''):
+            mn = re.search(pref + r'\s*(\d{2}\.\d{3})\s*-\s*(.+?)\s+Depuis', flat)
+            if mn:
+                out['code_nace'] = mn.group(1)
+                out['secteur_activite'] = mn.group(2).strip()[:70]
+                break
         # Adresse du siège (secours si VIES n'a pas répondu)
         if not out.get('adresse_siege_social_1'):
             m = re.search(r'Adresse du si\S+ge:?(.*?)</tr>', html, re.S)
