@@ -637,6 +637,52 @@ def bce_lookup(numero):
     except Exception:
         pass
 
+    # 3) Répertoire des employeurs ONSS (API publique de la sécurité sociale) :
+    #    numéro ONSS + catégorie employeur (indice) + NACE officiel + adresse FR.
+    try:
+        r = requests.get(
+            "https://services.socialsecurity.be/REST/employer/identification/v6/employers/search",
+            params={"enterpriseNumber": str(int(num)), "history": "true"},
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}, timeout=12)
+        d = r.json() if r.status_code < 300 else {}
+        if isinstance(d, list):
+            d = d[0] if d else {}
+        ident = d.get('identity') or {}
+        nsso = (ident.get('ids') or {}).get('nssoNumber')
+        if nsso:
+            s = str(nsso).zfill(9)
+            out['num_onss'] = f"{s[:7]}-{s[7:]}"
+            out['trouve'] = True
+        # Catégorie employeur ONSS = « indice ONSS » (souvent vide pour le secteur public)
+        cats = d.get('employerCategories') or []
+        if cats and isinstance(cats[0], dict):
+            cat = cats[0].get('category') or cats[0].get('code')
+            if cat:
+                out['indice_onss'] = str(cat)
+        # NACE officiel ONSS (version la plus récente, période en cours)
+        try:
+            codes = ((d.get('economicActivity') or {}).get('activityCodes') or [{}])[0]
+            for version in ('nace2025', 'nace2008'):
+                actifs = [c for c in (codes.get(version) or []) if not c.get('endDate')]
+                if actifs:
+                    c = str(actifs[0]['code']).zfill(5)
+                    out['code_nace'] = f"{c[:2]}.{c[2:]}"
+                    break
+        except Exception:
+            pass
+        # Dénomination + adresse FR structurées (priorité sur VIES/BCE si présentes)
+        deno_fr = ((ident.get('denomination') or {}).get('fr') or '').strip()
+        if deno_fr:
+            out['nom_societe'] = deno_fr
+        adr = ident.get('address') or {}
+        rue = ((adr.get('streetName') or {}).get('fr') or '').strip()
+        if rue:
+            out['adresse_siege_social_1'] = f"{rue} {adr.get('houseNumber', '')}".strip()
+            commune = ((adr.get('municipalityName') or {}).get('fr') or '').strip()
+            out['adresse_siege_social_2'] = f"{adr.get('postCode', '')} {commune}".strip()
+    except Exception:
+        pass
+
     if not out['trouve']:
         return jsonify({"error": "Numéro introuvable à la BCE / TVA non valide."}), 404
     return jsonify(out), 200
