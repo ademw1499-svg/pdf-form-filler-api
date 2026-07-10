@@ -432,6 +432,30 @@ def get_prestations():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/prestations/mes', methods=['GET'])
+def prestations_mes():
+    """Tableau de bord : les prestations de la gestionnaire connectée (son poste =
+    son email) + celles en mode test. Toutes statuts, plus récentes d'abord."""
+    email = verify_user_token(request)
+    if not email:
+        return jsonify({"error": "Non authentifié"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    try:
+        import urllib.parse
+        postes = f'"{email}","TEST"'
+        q = (f"poste=in.({urllib.parse.quote(postes)})"
+             f"&select=employeur,periode,client_nom,statut,poste,updated_at,etats"
+             f"&order=updated_at.desc&limit=200")
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/prestations?{q}", headers=_supabase_headers(), timeout=10)
+        rows = r.json() if r.status_code < 300 else []
+        # allège : nb travailleurs au lieu du détail etats
+        for row in (rows if isinstance(rows, list) else []):
+            row['nb_travailleurs'] = len(row.pop('etats', {}) or {})
+        return jsonify(rows if isinstance(rows, list) else []), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/prestations/a-traiter', methods=['GET'])
 def prestations_a_traiter():
     """Lu en boucle par le veilleur (PC Prisma) : liste les prestations validees
@@ -536,6 +560,98 @@ def get_roster():
         r = requests.get(f"{SUPABASE_URL}/rest/v1/rosters?{q}", headers=_supabase_headers(), timeout=10)
         rows = r.json() if r.status_code < 300 else []
         return jsonify(rows[0] if rows else {"employeur": employeur, "travailleurs": []}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ============== PAIE : jobs pilotés depuis le portail, exécutés par le veilleur ==============
+@app.route('/paie/lancer', methods=['POST'])
+def paie_lancer():
+    """Le portail demande un calcul de paie (module live). Crée un job 'pending'
+    que le veilleur du poste (email de la gestionnaire, ou TEST) exécutera."""
+    email = verify_user_token(request)
+    if not email:
+        return jsonify({"error": "Non authentifié"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    d = request.get_json() or {}
+    employeur = str(d.get('employeur') or '').strip()
+    if not employeur:
+        return jsonify({"error": "employeur requis"}), 400
+    row = {
+        'employeur': employeur, 'mois': int(d.get('mois') or 0), 'annee': int(d.get('annee') or 0),
+        'mode': str(d.get('mode') or 'A').strip()[:1].upper() or 'A',
+        'module': str(d.get('module') or 'paie').strip(),
+        'poste': 'TEST' if d.get('test') else email,
+        'statut': 'pending', 'evenements': [],
+    }
+    try:
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/paie_jobs",
+            headers={**_supabase_headers(), 'Content-Type': 'application/json', 'Prefer': 'return=representation'},
+            json=row, timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": f"Supabase {r.status_code}: {r.text[:200]}"}), 500
+        created = (r.json() or [{}])[0]
+        return jsonify({"ok": True, "id": created.get('id'), "poste": row['poste']}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/paie/a-traiter', methods=['GET'])
+def paie_a_traiter():
+    """Le veilleur récupère les jobs paie 'pending' de SON poste."""
+    token_attendu = os.environ.get('PRESTATIONS_TOKEN')
+    if not token_attendu or request.headers.get('X-Prestations-Token') != token_attendu:
+        return jsonify({"error": "Non autorisé"}), 401
+    poste = (request.args.get('poste') or '').strip()
+    if not poste:
+        return jsonify({"error": "poste requis"}), 400
+    try:
+        import urllib.parse
+        q = (f"statut=eq.pending&poste=eq.{urllib.parse.quote(poste)}"
+             f"&select=*&order=created_at.asc")
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/paie_jobs?{q}", headers=_supabase_headers(), timeout=10)
+        return jsonify(r.json() if r.status_code < 300 else []), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/paie/maj', methods=['POST'])
+def paie_maj():
+    """Le veilleur met à jour un job (statut + liste d'événements travailleur)."""
+    token_attendu = os.environ.get('PRESTATIONS_TOKEN')
+    if not token_attendu or request.headers.get('X-Prestations-Token') != token_attendu:
+        return jsonify({"error": "Non autorisé"}), 401
+    d = request.get_json() or {}
+    job_id = d.get('id')
+    if not job_id:
+        return jsonify({"error": "id requis"}), 400
+    patch = {'updated_at': datetime.now().isoformat()}
+    if 'statut' in d:
+        patch['statut'] = str(d['statut'])[:20]
+    if 'evenements' in d:
+        patch['evenements'] = d['evenements']
+    try:
+        r = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/paie_jobs?id=eq.{int(job_id)}",
+            headers={**_supabase_headers(), 'Content-Type': 'application/json', 'Prefer': 'return=minimal'},
+            json=patch, timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": f"Supabase {r.status_code}: {r.text[:200]}"}), 500
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/paie/job/<int:job_id>', methods=['GET'])
+def paie_job(job_id):
+    """Le portail suit l'avancement d'un job (statut + événements)."""
+    if not verify_user_token(request):
+        return jsonify({"error": "Non authentifié"}), 401
+    try:
+        q = f"id=eq.{job_id}&select=*&limit=1"
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/paie_jobs?{q}", headers=_supabase_headers(), timeout=10)
+        rows = r.json() if r.status_code < 300 else []
+        if not rows:
+            return jsonify({"error": "Job introuvable"}), 404
+        return jsonify(rows[0]), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
