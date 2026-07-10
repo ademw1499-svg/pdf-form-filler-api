@@ -750,6 +750,53 @@ def bce_lookup(numero):
                     out['trouve'] = True
                 if len(lignes) > 1:
                     out['adresse_siege_social_2'] = lignes[1]
+        # Fonctions (représentants légaux) : administrateur délégué / gérant /
+        # administrateur… -> pré-remplit le signataire de l'affiliation.
+        def _txt(x):
+            x = re.sub(r'<[^>]+>', ' ', x)
+            x = (x.replace('&nbsp;', ' ').replace('&#39;', chr(39))
+                   .replace('&amp;', '&').replace('’', chr(39)))
+            return re.sub(r'\s+', ' ', x).strip()
+        reps = []
+        mtab = re.search(r'id="toonfctie".*?</table>', html, re.S)
+        if mtab:
+            for row in re.findall(r'<tr>(.*?)</tr>', mtab.group(0), re.S):
+                tds = re.findall(r'<td[^>]*>(.*?)</td>', row, re.S)
+                if len(tds) < 2:
+                    continue
+                fonction = _txt(tds[0])
+                parts = [p for p in (_txt(p) for p in _txt(tds[1]).split(',')) if p]
+                # BCE liste "Nom , Prénom" -> on affiche "Prénom Nom"
+                nom = f"{parts[1]} {parts[0]}" if len(parts) >= 2 else (parts[0] if parts else '')
+                if fonction and nom:
+                    reps.append({"fonction": fonction, "nom": nom})
+        if reps:
+            # priorité au représentant qui signe habituellement
+            rank = [('administrateur délégué', 0), ('administrateur-délégué', 0),
+                    ('administrateur unique', 0), ('gérant', 1), ('gerant', 1),
+                    ('administrateur', 2), ('représentant permanent', 3),
+                    ('gestion journalière', 3)]
+            def _rk(r):
+                f = r['fonction'].lower()
+                for k, v in rank:
+                    if k in f:
+                        return v
+                return 5
+            reps = sorted(reps, key=_rk)
+            # dedup par personne (garde la fonction la mieux classée)
+            vus, uniq = set(), []
+            for r in reps:
+                cle = r['nom'].lower()
+                if cle in vus:
+                    continue
+                vus.add(cle)
+                uniq.append(r)
+            reps = uniq
+            main = reps[0]
+            out['nom_prenom_gerant'] = main['nom']
+            out['qualite'] = main['fonction']
+            out['representants'] = reps[:12]
+            out['trouve'] = True
     except Exception:
         pass
 
