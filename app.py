@@ -757,19 +757,29 @@ def bce_lookup(numero):
             x = (x.replace('&nbsp;', ' ').replace('&#39;', chr(39))
                    .replace('&amp;', '&').replace('’', chr(39)))
             return re.sub(r'\s+', ' ', x).strip()
+        # kbopub affiche les fonctions soit repliées dans une table id="toonfctie"
+        # (grosses sociétés), soit directement en clair (petites sociétés) -> on
+        # scanne TOUTE la section « Fonctions » quelle que soit la mise en page.
         reps = []
-        mtab = re.search(r'id="toonfctie".*?</table>', html, re.S)
-        if mtab:
-            for row in re.findall(r'<tr>(.*?)</tr>', mtab.group(0), re.S):
-                tds = re.findall(r'<td[^>]*>(.*?)</td>', row, re.S)
-                if len(tds) < 2:
-                    continue
-                fonction = _txt(tds[0])
-                parts = [p for p in (_txt(p) for p in _txt(tds[1]).split(',')) if p]
-                # BCE liste "Nom , Prénom" -> on affiche "Prénom Nom"
-                nom = f"{parts[1]} {parts[0]}" if len(parts) >= 2 else (parts[0] if parts else '')
-                if fonction and nom:
-                    reps.append({"fonction": fonction, "nom": nom})
+        msec = re.search(r'Fonctions</h2>(.*?)(?:<h2>|<td class="I")', html, re.S)
+        bloc = msec.group(1) if msec else ''
+        for row in re.findall(r'<tr[^>]*>(.*?)</tr>', bloc, re.S):
+            if 'Depuis' not in row:  # chaque titulaire a une date « Depuis le … »
+                continue
+            tds = re.findall(r'<td[^>]*>(.*?)</td>', row, re.S)
+            if len(tds) < 2:
+                continue
+            fonction = _txt(tds[0])
+            # la cellule « nom » est celle qui contient une virgule (Nom , Prénom)
+            nom_cell = next((t for t in tds[1:] if ',' in _txt(t)), tds[1])
+            parts = [p for p in (_txt(p) for p in _txt(nom_cell).split(',')) if p]
+            # BCE liste "Nom , Prénom" -> on affiche "Prénom Nom"
+            nom = f"{parts[1]} {parts[0]}" if len(parts) >= 2 else (parts[0] if parts else '')
+            # ignore les administrateurs qui sont eux-mêmes une société (n° BCE, pas un nom)
+            if re.fullmatch(r'[\d.\s]+', nom or ''):
+                continue
+            if fonction and nom and 'Depuis' not in fonction:
+                reps.append({"fonction": fonction, "nom": nom})
         if reps:
             # priorité au représentant qui signe habituellement
             rank = [('administrateur délégué', 0), ('administrateur-délégué', 0),
