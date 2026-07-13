@@ -5,6 +5,7 @@ from reportlab.pdfgen import canvas
 import io
 import os
 import re
+import json
 import zipfile
 import requests
 from datetime import datetime
@@ -868,6 +869,85 @@ def bce_lookup(numero):
     if not d.get('trouve'):
         return jsonify({"error": "Numéro introuvable à la BCE / TVA non valide."}), 404
     return jsonify(d), 200
+
+
+# ============== SUIVI FICHES DE PAIE (tableau d'équipe) ==============
+# Remplace l'Excel « SUIVI Laure » : une ligne par entreprise et par mois, avec
+# statut, infos, GLP, DMFA, confirmation de clôture, gestionnaire et « en ordre ».
+FDP_COLS = ['mois', 'entreprise', 'date_fdp', 'statut', 'infos', 'glp',
+            'dmfa', 'cloture', 'gestionnaire', 'en_ordre']
+
+
+@app.route('/fdp', methods=['GET'])
+def fdp_liste():
+    """Lignes du suivi pour un mois (tableau partagé par toute l'équipe)."""
+    email = verify_user_token(request)
+    if not email:
+        return jsonify({"error": "Non authentifié"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    mois = re.sub(r'[^0-9-]', '', request.args.get('mois', ''))
+    try:
+        q = "select=*&order=id.asc&limit=500"
+        if mois:
+            q = f"mois=eq.{mois}&" + q
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/suivi_fdp?{q}",
+                         headers=_supabase_headers(), timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": r.text[:200]}), 500
+        return jsonify(r.json()), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/fdp/upsert', methods=['POST'])
+def fdp_upsert():
+    """Crée (sans id) ou met à jour (avec id) une ligne du suivi."""
+    email = verify_user_token(request)
+    if not email:
+        return jsonify({"error": "Non authentifié"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    d = request.get_json(silent=True) or {}
+    row = {k: d[k] for k in FDP_COLS if k in d}
+    row['maj_par'] = email
+    row['updated_at'] = datetime.utcnow().isoformat()
+    hdr = {**_supabase_headers(), 'Content-Type': 'application/json',
+           'Prefer': 'return=representation'}
+    try:
+        if d.get('id'):
+            r = requests.patch(f"{SUPABASE_URL}/rest/v1/suivi_fdp?id=eq.{int(d['id'])}",
+                               json=row, headers=hdr, timeout=10)
+        else:
+            if not (row.get('mois') and str(row.get('entreprise') or '').strip()):
+                return jsonify({"error": "mois et entreprise requis"}), 400
+            r = requests.post(f"{SUPABASE_URL}/rest/v1/suivi_fdp",
+                              json=row, headers=hdr, timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": r.text[:200]}), 500
+        out = r.json()
+        return jsonify(out[0] if isinstance(out, list) and out else out), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/fdp/supprimer', methods=['POST'])
+def fdp_supprimer():
+    """Supprime une ligne du suivi (par id)."""
+    email = verify_user_token(request)
+    if not email:
+        return jsonify({"error": "Non authentifié"}), 401
+    d = request.get_json(silent=True) or {}
+    if not d.get('id'):
+        return jsonify({"error": "id requis"}), 400
+    try:
+        r = requests.delete(f"{SUPABASE_URL}/rest/v1/suivi_fdp?id=eq.{int(d['id'])}",
+                            headers=_supabase_headers(), timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": r.text[:200]}), 500
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ============== RÈGLEMENT DE TRAVAIL ==============
