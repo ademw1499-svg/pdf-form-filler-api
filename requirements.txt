@@ -4,3 +4,5 @@ pypdf==3.17.1
 reportlab==4.0.7
 gunicorn==21.2.0
 requests==2.31.0
+python-docx==1.1.2
+docxcompose==1.4.0

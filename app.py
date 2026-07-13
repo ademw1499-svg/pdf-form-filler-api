@@ -671,15 +671,15 @@ def _bce_forme(texte):
         return 'PERSONNE PHYSIQUE'
     return ''
 
-@app.route('/bce/<numero>', methods=['GET'])
-def bce_lookup(numero):
-    """Pré-remplissage affiliation : interroge VIES (nom+adresse, JSON officiel UE)
-    et la fiche publique BCE (dénomination, forme légale). Données publiques."""
+def _bce_data(numero):
+    """Interroge VIES (nom+adresse, JSON officiel UE) et la fiche publique BCE
+    (dénomination, forme légale, NACE, ONSS, représentants). Données publiques.
+    Retourne un dict `out` (avec clé 'trouve'), ou {'error':…, '_status':…}."""
     num = re.sub(r'\D', '', numero or '')
     if len(num) == 9:
         num = '0' + num
     if len(num) != 10:
-        return jsonify({"error": "Numéro invalide — attendu 10 chiffres (ex : BE 0123.456.789)"}), 400
+        return {"error": "Numéro invalide — attendu 10 chiffres (ex : BE 0123.456.789)", "_status": 400}
     fmt = f"{num[0:4]}.{num[4:7]}.{num[7:10]}"
     out = {"num_entreprise": f"BE {fmt}", "num_tva": f"BE {fmt}", "trouve": False}
 
@@ -856,9 +856,83 @@ def bce_lookup(numero):
     except Exception:
         pass
 
-    if not out['trouve']:
+    return out
+
+
+@app.route('/bce/<numero>', methods=['GET'])
+def bce_lookup(numero):
+    """Pré-remplissage affiliation (données publiques BCE/VIES/ONSS)."""
+    d = _bce_data(numero)
+    if d.get('error'):
+        return jsonify({"error": d['error']}), d.get('_status', 400)
+    if not d.get('trouve'):
         return jsonify({"error": "Numéro introuvable à la BCE / TVA non valide."}), 404
-    return jsonify(out), 200
+    return jsonify(d), 200
+
+
+# ============== RÈGLEMENT DE TRAVAIL ==============
+_HORAIRE_MANIFEST = None
+
+
+def _horaire_manifest():
+    """Charge (et met en cache) le manifeste id_modèle -> nom de fichier storage."""
+    global _HORAIRE_MANIFEST
+    if _HORAIRE_MANIFEST is None:
+        try:
+            path = os.path.join(os.path.dirname(__file__), 'horaires_manifest.json')
+            with open(path, encoding='utf-8') as f:
+                _HORAIRE_MANIFEST = json.load(f)
+        except Exception as e:
+            print(f"[REGLEMENT] manifeste horaires illisible: {e}")
+            _HORAIRE_MANIFEST = {}
+    return _HORAIRE_MANIFEST
+
+
+def _fetch_horaire_model(model_id):
+    """Récupère le .docx du modèle d'horaire depuis Supabase Storage (bucket privé
+    'horaires'). Retourne les bytes, ou None si absent / non configuré."""
+    fn = _horaire_manifest().get(model_id)
+    if not fn or not SUPABASE_URL or not SUPABASE_KEY:
+        return None
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/storage/v1/object/horaires/{fn}",
+            headers={'apikey': SUPABASE_KEY, 'Authorization': f'Bearer {SUPABASE_KEY}'},
+            timeout=20)
+        if r.status_code < 300 and r.content:
+            return r.content
+        print(f"[REGLEMENT] modèle {fn} -> HTTP {r.status_code}")
+    except Exception as e:
+        print(f"[REGLEMENT] échec récupération modèle: {e}")
+    return None
+
+
+@app.route('/reglement/generer', methods=['POST'])
+def reglement_generer():
+    """Génère le règlement de travail (.docx) depuis le contrat §6.
+    Identité société via BCE ; horaire sectoriel joint en Annexe 1 si un modèle
+    est choisi. Données publiques -> pas d'auth (comme /bce)."""
+    payload = request.get_json(silent=True) or {}
+    num = payload.get('num_entreprise')
+    identity = None
+    if num:
+        d = _bce_data(num)
+        if not d.get('error'):
+            identity = d
+    model_bytes = None
+    mid = (payload.get('horaire_modele') or '').strip()
+    if mid:
+        model_bytes = _fetch_horaire_model(mid)
+    try:
+        from reglement_gen import build_reglement
+        data = build_reglement(payload, identity, model_bytes)
+    except Exception as e:
+        return jsonify({"error": f"Échec de la génération : {e}"}), 500
+    nom = 'reglement_' + (re.sub(r'\D', '', str(num or '')) or 'employeur') + '.docx'
+    return send_file(
+        io.BytesIO(data),
+        mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        as_attachment=True, download_name=nom)
 
 # ============== INDIVIDUAL ENDPOINTS ==============
 @app.route('/fill-employer-form', methods=['POST'])
