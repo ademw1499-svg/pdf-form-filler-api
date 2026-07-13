@@ -370,22 +370,31 @@ def build_reglement(payload, identity=None, model_bytes=None):
         _h_chapter(doc, titre)
         for para in paras:
             _para(doc, para.format(**subst))
-        # Après le chapitre I : insère l'horaire saisi à la main (si pas de modèle)
+        # Après le chapitre I : insère l'horaire (annexe modèle, table manuelle,
+        # ou simple référence au modèle si le fichier n'a pas pu être joint).
         if titre.startswith('CHAPITRE I ') or titre.startswith('HOOFDSTUK I '):
-            if not modele:
-                ouv = hor.get('ouvrier') or {}
+            ouv = hor.get('ouvrier') or {}
+            emp = hor.get('employe')
+            a_manuel = any((ouv.get('jours') or {}).get(j) for j in JOURS) or \
+                (emp and any((emp.get('jours') or {}).get(j) for j in JOURS))
+            if model_bytes:
+                _para(doc, ('L\'horaire de travail applicable figure en Annexe 1.' if lang == 'FR'
+                            else 'Het toepasselijke uurrooster staat in Bijlage 1.'),
+                      italic=True, color=GREY)
+            elif a_manuel:
                 if any((ouv.get('jours') or {}).get(j) for j in JOURS):
                     _para(doc, ('Horaire — ouvriers / personnel' if lang == 'FR' else 'Uurrooster — arbeiders'),
                           bold=True, size=10.5, space_after=3)
                     _horaire_table(doc, lang, ouv.get('jours'), ouv.get('heures_semaine'))
-                emp = hor.get('employe')
                 if emp and any((emp.get('jours') or {}).get(j) for j in JOURS):
                     _para(doc, ('Horaire — employés' if lang == 'FR' else 'Uurrooster — bedienden'),
                           bold=True, size=10.5, space_after=3)
                     _horaire_table(doc, lang, emp.get('jours'), emp.get('heures_semaine'))
-            else:
-                _para(doc, ('L\'horaire de travail applicable figure en Annexe 1.' if lang == 'FR'
-                            else 'Het toepasselijke uurrooster staat in Bijlage 1.'),
+            elif modele:
+                label = modele.split('/')[-1].rsplit('.', 1)[0]
+                _para(doc, (f'Horaire de travail : modèle sectoriel « {label} » — à joindre en annexe.'
+                            if lang == 'FR'
+                            else f'Uurrooster: sectoraal model « {label} » — als bijlage toe te voegen.'),
                       italic=True, color=GREY)
 
     # Signatures
