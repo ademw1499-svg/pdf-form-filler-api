@@ -17,6 +17,20 @@ from docx.oxml.ns import qn
 
 BLANK = '…………'
 
+JOURS_FR = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche']
+JOURS_NL = ['maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag', 'zondag']
+
+
+def _jour(idx, lang):
+    """Nom de jour localisé depuis un index 0=lundi (ou un nom déjà écrit)."""
+    if idx in (None, ''):
+        return BLANK
+    tab = JOURS_NL if lang == 'NL' else JOURS_FR
+    try:
+        return tab[int(idx) % 7]
+    except (ValueError, TypeError):
+        return str(idx)
+
 
 def _decoupe_adresse(idd):
     """(adresse_1, adresse_2 BCE) -> (rue, n°, code postal, localité)."""
@@ -36,6 +50,7 @@ def _decoupe_adresse(idd):
 def _valeurs(payload, identity):
     """Correspondance jeton -> valeur. Ce qu'on n'a pas -> BLANK (à compléter)."""
     idd = identity or {}
+    lang = 'NL' if str(payload.get('reglement_langue') or 'FR').upper() == 'NL' else 'FR'
     rue, nomaison, cp, loc = _decoupe_adresse(idd)
     ent = re.sub(r'\D', '', payload.get('num_entreprise', '') or '')
     if len(ent) == 9:
@@ -73,6 +88,13 @@ def _valeurs(payload, identity):
         # --- Noms d'institutions sans ambiguïté dans le modèle ---
         'Nom_1_institution_Inst_v5': ou(payload.get('assurance_loi')),   # assurance-loi
         'Nom_1_institution_Inst_v1': ou(payload.get('caisse_vacances')),  # caisse de vacances
+        # --- Cadre horaire (Article 10 §2) depuis les heures d'ouverture ---
+        'cadre_debut': ou(payload.get('ouverture_debut')),
+        'cadre_fin': ou(payload.get('ouverture_fin')),
+        'cadre_jour_debut': _jour(payload.get('ouverture_jour_debut'), lang),
+        'cadre_jour_fin': _jour(payload.get('ouverture_jour_fin'), lang),
+        'cadre_min': '3',
+        'cadre_max': ou(payload.get('max_journalier')) if payload.get('max_journalier') else '9',
     }
     # Tout jeton non couvert -> BLANK (renseigné dynamiquement au remplissage)
     return v
