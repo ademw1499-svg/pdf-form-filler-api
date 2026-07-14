@@ -142,14 +142,17 @@ def _jours_ouverts(jd, jf):
     return out
 
 
+SEUIL_PAUSE = 240   # à partir de 4h de travail on insère une pause (matin/après-midi)
+
+
 def _decoupe_jour(st, work, pause):
-    """Découpe une journée en matin + pause + après-midi (pause si travail > 6h).
+    """Découpe une journée en matin + pause + après-midi (pause dès 4h de travail).
     Retourne (matin_de, matin_a, aprem_de, aprem_a) en minutes ; aprem_de==matin_a
-    s'il n'y a pas de pause."""
-    if work <= 360:  # ≤ 6h : pas de pause obligatoire, bloc continu
+    s'il n'y a pas de pause (journée très courte)."""
+    if work < SEUIL_PAUSE:                              # < 4h : bloc continu
         return st, st + work, st + work, st + work
-    matin = int(round((work / 2) / 30.0)) * 30      # moitié arrondie à 30 min
-    matin = max(180, min(matin, work - 180))          # chaque bloc ≥ 3h
+    matin = int(round((work / 2) / 30.0)) * 30          # moitié arrondie à 30 min
+    matin = max(90, min(matin, work - 90))              # chaque bloc ≥ 1h30
     aprem = work - matin
     m_a = st + matin
     a_de = m_a + pause
@@ -203,42 +206,35 @@ def generer_horaires(payload, langue='FR', cible=2280, max_daily=480, min_block=
 
     win_len = win_e - win_s
 
-    def construire(exact):
-        for work, off, mode in arrangements():
-            n = len(work)
-            daily_t = cible // n
-            span_t = daily_t + (pause if daily_t > 360 else 0)
-            if exact:
-                if span_t > win_len:
-                    continue                      # 38h ne rentre pas dans la fenêtre
-                daily = daily_t
-            else:
-                # repli : on remplit la fenêtre (moins la pause) -> total < 38h
-                daily = min(win_len - (pause if (win_len - pause) > 360 else 0), max_daily)
-                if daily >= daily_t:
-                    continue                      # aurait tenu en 38h -> déjà couvert
-            if daily < min_block or daily > max_daily:
-                continue
-            span = daily + (pause if daily > 360 else 0)
-            st = win_s
-            while st + span <= win_e:
-                m_de, m_a, a_de, a_a = _decoupe_jour(st, daily, pause)
-                lignes = [(day, m_de, m_a, a_de, a_a) for day in sorted(work)]
-                repos = ', '.join(noms[o] for o in off)
-                total = daily * n
-                approx = '' if total == cible else (
-                    f" · {_duree(total)}/sem" if langue != 'NL' else f" · {_duree(total)}/week")
-                titre = (f"{mode} — {'repos' if langue != 'NL' else 'rust'} {repos}"
-                         f" · {'début' if langue != 'NL' else 'start'} {_hhmm(st)}{approx}")
-                schedules.append({'titre': titre, 'lignes': lignes, 'off': off,
-                                  'total': total, 'pause': pause if daily > 360 else 0})
-                if len(schedules) >= max_tables:
-                    return
-                st += pas
-
-    construire(exact=True)
-    if not schedules:
-        construire(exact=False)   # aucune combinaison 38h : on propose le mieux qui rentre
+    # Un passage unique : on génère TOUJOURS le 6 jours ET le 5 jours (quand le
+    # nombre de jours ouverts le permet). Pour chaque combinaison, on vise 38h ;
+    # si ça ne rentre pas dans la fenêtre, on remplit au mieux (total étiqueté).
+    for work, off, mode in arrangements():
+        n = len(work)
+        daily_t = cible // n
+        span_t = daily_t + (pause if daily_t >= SEUIL_PAUSE else 0)
+        if span_t <= win_len:
+            daily = daily_t                                   # 38h pile
+        elif (win_len - pause) >= min_block:
+            daily = min(win_len - pause, max_daily)            # remplit la fenêtre
+        else:
+            continue                                           # fenêtre trop petite
+        span = daily + (pause if daily >= SEUIL_PAUSE else 0)
+        st = win_s
+        while st + span <= win_e:
+            m_de, m_a, a_de, a_a = _decoupe_jour(st, daily, pause)
+            lignes = [(day, m_de, m_a, a_de, a_a) for day in sorted(work)]
+            repos = ', '.join(noms[o] for o in off)
+            total = daily * n
+            approx = '' if total == cible else (
+                f" · {_duree(total)}/sem" if langue != 'NL' else f" · {_duree(total)}/week")
+            titre = (f"{mode} — {'repos' if langue != 'NL' else 'rust'} {repos}"
+                     f" · {'début' if langue != 'NL' else 'start'} {_hhmm(st)}{approx}")
+            schedules.append({'titre': titre, 'lignes': lignes, 'off': off,
+                              'total': total, 'pause': pause if daily >= SEUIL_PAUSE else 0})
+            if len(schedules) >= max_tables:
+                return schedules
+            st += pas
     return schedules
 
 
