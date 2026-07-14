@@ -9,6 +9,7 @@ import json
 import zipfile
 import requests
 from datetime import datetime
+from html import unescape as _unescape   # décode TOUTES les entités HTML (&Acirc; -> Â, &eacute; -> é…)
 
 app = Flask(__name__)
 CORS(app)
@@ -715,8 +716,8 @@ def _bce_data(numero):
             m = re.search(pattern + r'.*?<td[^>]*>(.*?)</td>', html, re.S)
             if not m:
                 return ''
-            t = re.sub(r'<[^>]+>|\s+', ' ', m.group(1)).strip()
-            return t.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&#39;', chr(39))
+            t = _unescape(re.sub(r'<[^>]+>|\s+', ' ', m.group(1))).strip()
+            return t
         deno = _cell(r'D\S+nomination:')
         if deno:
             # coupe les mentions du type "Dénomination en français, depuis le ..."
@@ -729,9 +730,7 @@ def _bce_data(numero):
         # Code NACE + secteur d'activité (priorité ONSS -> TVA -> NACE-BEL 2008).
         # NB : une société a souvent PLUSIEURS codes NACE ; on prend l'activité
         # principale ONSS et le gestionnaire vérifie.
-        flat = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', html)
-                      .replace('&nbsp;', ' ').replace('&#39;', chr(39))
-                      .replace('&amp;', '&').replace('’', chr(39)))
+        flat = re.sub(r'\s+', ' ', _unescape(re.sub(r'<[^>]+>', ' ', html)).replace('’', chr(39)))
         for pref in (r'ONSS\s*\d{4}', r'TVA\s*\d{4}', r''):
             mn = re.search(pref + r'\s*(\d{2}\.\d{3})\s*-\s*(.+?)\s+Depuis', flat)
             if mn:
@@ -743,7 +742,7 @@ def _bce_data(numero):
             m = re.search(r'Adresse du si\S+ge:?(.*?)</tr>', html, re.S)
             if m:
                 txt = re.sub(r'<br\s*/?>', '\n', m.group(1))
-                txt = re.sub(r'<[^>]+>', ' ', txt).replace('&nbsp;', ' ')
+                txt = _unescape(re.sub(r'<[^>]+>', ' ', txt))
                 lignes = [re.sub(r'\s+', ' ', l).strip() for l in txt.split('\n')]
                 lignes = [l for l in lignes if l and 'Depuis' not in l]
                 if lignes:
@@ -754,9 +753,7 @@ def _bce_data(numero):
         # Fonctions (représentants légaux) : administrateur délégué / gérant /
         # administrateur… -> pré-remplit le signataire de l'affiliation.
         def _txt(x):
-            x = re.sub(r'<[^>]+>', ' ', x)
-            x = (x.replace('&nbsp;', ' ').replace('&#39;', chr(39))
-                   .replace('&amp;', '&').replace('’', chr(39)))
+            x = _unescape(re.sub(r'<[^>]+>', ' ', x)).replace('’', chr(39))
             return re.sub(r'\s+', ' ', x).strip()
         # kbopub affiche les fonctions soit repliées dans une table id="toonfctie"
         # (grosses sociétés), soit directement en clair (petites sociétés) -> on
