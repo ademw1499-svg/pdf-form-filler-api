@@ -872,7 +872,7 @@ def bce_lookup(numero):
 # Remplace l'Excel « SUIVI Laure » : une ligne par entreprise et par mois, avec
 # statut, infos, GLP, DMFA, confirmation de clôture, gestionnaire et « en ordre ».
 FDP_COLS = ['mois', 'entreprise', 'date_fdp', 'statut', 'infos', 'glp',
-            'dmfa', 'cloture', 'gestionnaire', 'en_ordre']
+            'dmfa', 'c4', 'cloture', 'gestionnaire', 'en_ordre']
 
 
 @app.route('/fdp', methods=['GET'])
