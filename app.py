@@ -968,23 +968,32 @@ def _horaire_manifest():
     return _HORAIRE_MANIFEST
 
 
-def _fetch_horaire_model(model_id):
-    """Récupère le .docx du modèle d'horaire depuis Supabase Storage (bucket privé
-    'horaires'). Retourne les bytes, ou None si absent / non configuré."""
-    fn = _horaire_manifest().get(model_id)
+def _fetch_storage(bucket, fn):
+    """Télécharge un objet d'un bucket Supabase Storage privé. Bytes ou None."""
     if not fn or not SUPABASE_URL or not SUPABASE_KEY:
         return None
     try:
         r = requests.get(
-            f"{SUPABASE_URL}/storage/v1/object/horaires/{fn}",
+            f"{SUPABASE_URL}/storage/v1/object/{bucket}/{fn}",
             headers={'apikey': SUPABASE_KEY, 'Authorization': f'Bearer {SUPABASE_KEY}'},
             timeout=20)
         if r.status_code < 300 and r.content:
             return r.content
-        print(f"[REGLEMENT] modèle {fn} -> HTTP {r.status_code}")
+        print(f"[REGLEMENT] {bucket}/{fn} -> HTTP {r.status_code}")
     except Exception as e:
-        print(f"[REGLEMENT] échec récupération modèle: {e}")
+        print(f"[REGLEMENT] échec récupération {bucket}/{fn}: {e}")
     return None
+
+
+def _fetch_horaire_model(model_id):
+    """Récupère le .docx du modèle d'horaire (bucket 'horaires')."""
+    return _fetch_storage('horaires', _horaire_manifest().get(model_id))
+
+
+def _fetch_reglement_template(langue):
+    """Récupère le modèle officiel FR/NL (bucket 'reglement')."""
+    lang = 'NL' if str(langue or 'FR').upper() == 'NL' else 'FR'
+    return _fetch_storage('reglement', f'reglement_{lang}.docx')
 
 
 @app.route('/reglement/generer', methods=['POST'])
@@ -999,13 +1008,16 @@ def reglement_generer():
         d = _bce_data(num)
         if not d.get('error'):
             identity = d
+    template_bytes = _fetch_reglement_template(payload.get('reglement_langue'))
+    if not template_bytes:
+        return jsonify({"error": "Le modèle de règlement n'est pas encore hébergé (upload Supabase à faire)."}), 503
     model_bytes = None
     mid = (payload.get('horaire_modele') or '').strip()
     if mid:
         model_bytes = _fetch_horaire_model(mid)
     try:
         from reglement_gen import build_reglement
-        data = build_reglement(payload, identity, model_bytes)
+        data = build_reglement(payload, identity, template_bytes, model_bytes)
     except Exception as e:
         return jsonify({"error": f"Échec de la génération : {e}"}), 500
     nom = 'reglement_' + (re.sub(r'\D', '', str(num or '')) or 'employeur') + '.docx'
