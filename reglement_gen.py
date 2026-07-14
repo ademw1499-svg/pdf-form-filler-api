@@ -142,10 +142,26 @@ def _jours_ouverts(jd, jf):
     return out
 
 
-def generer_horaires(payload, langue='FR', cible=2280, max_daily=480, min_block=180, max_tables=30):
-    """Propose des horaires-types valides à partir des heures d'ouverture.
-    Pour 5 et 6 jours de travail, avec différentes combinaisons de jours de repos.
-    Chaque jour presté = même bloc continu (respecte d'office les 11h de repos)."""
+def _decoupe_jour(st, work, pause):
+    """Découpe une journée en matin + pause + après-midi (pause si travail > 6h).
+    Retourne (matin_de, matin_a, aprem_de, aprem_a) en minutes ; aprem_de==matin_a
+    s'il n'y a pas de pause."""
+    if work <= 360:  # ≤ 6h : pas de pause obligatoire, bloc continu
+        return st, st + work, st + work, st + work
+    matin = int(round((work / 2) / 30.0)) * 30      # moitié arrondie à 30 min
+    matin = max(180, min(matin, work - 180))          # chaque bloc ≥ 3h
+    aprem = work - matin
+    m_a = st + matin
+    a_de = m_a + pause
+    return st, m_a, a_de, a_de + aprem
+
+
+def generer_horaires(payload, langue='FR', cible=2280, max_daily=480, min_block=180,
+                     pause=30, pas=30, max_tables=600):
+    """Génère les horaires-types valides depuis les heures d'ouverture.
+    Pour 5 et 6 jours de travail, avec les différentes combinaisons de jours de
+    repos ET toutes les heures de début par pas de 30 min. Chaque journée intègre
+    la pause si le travail dépasse 6h. Même bloc chaque jour -> 11h de repos OK."""
     d, f = _min(payload.get('ouverture_debut')), _min(payload.get('ouverture_fin'))
     if d is None or f is None:
         return []
@@ -171,28 +187,24 @@ def generer_horaires(payload, langue='FR', cible=2280, max_daily=480, min_block=
                 if len(work) == 5:
                     yield work, pair, ('5 jours' if langue != 'NL' else '5 dagen')
 
-    vus = set()
     for work, off, mode in arrangements():
         n = len(work)
         daily = cible // n
         if daily > max_daily or daily < min_block:
             continue
-        # quelques heures de début possibles (toutes les 2h, max 3 variantes)
-        starts, s = [], win_s
-        while s + daily <= win_e and len(starts) < 3:
-            starts.append(s); s += 120
-        for si, st in enumerate(starts):
-            cle = (tuple(sorted(work)), st, daily)
-            if cle in vus:
-                continue
-            vus.add(cle)
-            lignes = [(day, st, st + daily) for day in sorted(work)]
+        span = daily + (pause if daily > 360 else 0)   # amplitude = travail + pause
+        st = win_s
+        while st + span <= win_e:
+            m_de, m_a, a_de, a_a = _decoupe_jour(st, daily, pause)
+            lignes = [(day, m_de, m_a, a_de, a_a) for day in sorted(work)]
             repos = ', '.join(noms[o] for o in off)
             titre = (f"{mode} — {'repos' if langue != 'NL' else 'rust'} {repos}"
-                     + (f" ({'début' if langue != 'NL' else 'start'} {_hhmm(st)})" if si else ""))
-            schedules.append({'titre': titre, 'lignes': lignes, 'off': off, 'total': daily * n})
+                     f" · {'début' if langue != 'NL' else 'start'} {_hhmm(st)}")
+            schedules.append({'titre': titre, 'lignes': lignes, 'off': off,
+                              'total': daily * n, 'pause': pause if daily > 360 else 0})
             if len(schedules) >= max_tables:
                 return schedules
+            st += pas
     return schedules
 
 
@@ -224,24 +236,27 @@ def _ajouter_annexe_horaires(doc, schedules, langue='FR'):
         if langue != 'NL' else
         "Mogelijke uurroosters binnen de openingsuren, 38u/week. Juridisch te valideren.")
     ri.italic = True; ri.font.size = Pt(9)
-    thd = ['Jour', 'De', 'À', 'Durée'] if langue != 'NL' else ['Dag', 'Van', 'Tot', 'Duur']
+    thd = (['Jour', 'Matin', 'Pause', 'Après-midi', 'Durée'] if langue != 'NL'
+           else ['Dag', 'Voormiddag', 'Pauze', 'Namiddag', 'Duur'])
     for sc in schedules:
         p = doc.add_paragraph()
-        rp = p.add_run(sc['titre']); rp.bold = True; rp.font.size = Pt(11); rp.font.color.rgb = ACCENT
-        p.paragraph_format.space_before = Pt(10); p.paragraph_format.space_after = Pt(2)
-        tbl = doc.add_table(rows=1, cols=4)
+        rp = p.add_run(sc['titre']); rp.bold = True; rp.font.size = Pt(10.5); rp.font.color.rgb = ACCENT
+        p.paragraph_format.space_before = Pt(9); p.paragraph_format.space_after = Pt(2)
+        tbl = doc.add_table(rows=1, cols=5)
         _bordures(tbl)
         for i, t in enumerate(thd):
             tbl.rows[0].cells[i].paragraphs[0].add_run(t).bold = True
-        for day, st, en in sc['lignes']:
+        for day, m_de, m_a, a_de, a_a in sc['lignes']:
             c = tbl.add_row().cells
             c[0].paragraphs[0].add_run(noms[day].capitalize())
-            c[1].paragraphs[0].add_run(_hhmm(st))
-            c[2].paragraphs[0].add_run(_hhmm(en))
-            c[3].paragraphs[0].add_run(_duree(en - st))
+            c[1].paragraphs[0].add_run(f"{_hhmm(m_de)} – {_hhmm(m_a)}")
+            c[2].paragraphs[0].add_run(f"{_hhmm(m_a)} – {_hhmm(a_de)}" if a_de > m_a else '—')
+            c[3].paragraphs[0].add_run(f"{_hhmm(a_de)} – {_hhmm(a_a)}" if a_a > a_de else '—')
+            c[4].paragraphs[0].add_run(_duree((m_a - m_de) + (a_a - a_de)))
         tot = doc.add_paragraph()
+        pz = (f" · pause {sc['pause']} min/jour" if sc.get('pause') else '')
         rt = tot.add_run(('Total : ' if langue != 'NL' else 'Totaal: ') + _duree(sc['total']) + ' / '
-                         + ('semaine' if langue != 'NL' else 'week'))
+                         + ('semaine' if langue != 'NL' else 'week') + pz)
         rt.font.size = Pt(9); rt.italic = True
 
 
