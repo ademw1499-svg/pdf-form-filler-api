@@ -947,6 +947,87 @@ def fdp_supprimer():
         return jsonify({"error": str(e)}), 500
 
 
+# ============== RÉPERTOIRE DES INSTITUTIONS ==============
+# Adresses des organismes (caisse vacances, assurance-loi, fonds, SEPPT, bureaux
+# de contrôle…), saisies UNE fois, réutilisées dans les règlements par leur nom.
+INST_COLS = ['nom', 'type', 'rue', 'numero', 'code_postal', 'localite',
+             'num_affiliation', 'province', 'note']
+
+
+@app.route('/institutions', methods=['GET'])
+def institutions_liste():
+    email = verify_user_token(request)
+    if not email:
+        return jsonify({"error": "Non authentifié"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    try:
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/institutions?select=*&order=type.asc,nom.asc&limit=1000",
+                         headers=_supabase_headers(), timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": r.text[:200]}), 500
+        return jsonify(r.json()), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/institutions/upsert', methods=['POST'])
+def institutions_upsert():
+    email = verify_user_token(request)
+    if not email:
+        return jsonify({"error": "Non authentifié"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    d = request.get_json(silent=True) or {}
+    row = {k: d[k] for k in INST_COLS if k in d}
+    row['updated_at'] = datetime.utcnow().isoformat()
+    hdr = {**_supabase_headers(), 'Content-Type': 'application/json', 'Prefer': 'return=representation'}
+    try:
+        if d.get('id'):
+            r = requests.patch(f"{SUPABASE_URL}/rest/v1/institutions?id=eq.{int(d['id'])}",
+                               json=row, headers=hdr, timeout=10)
+        else:
+            if not str(row.get('nom') or '').strip():
+                return jsonify({"error": "nom requis"}), 400
+            r = requests.post(f"{SUPABASE_URL}/rest/v1/institutions", json=row, headers=hdr, timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": r.text[:200]}), 500
+        out = r.json()
+        return jsonify(out[0] if isinstance(out, list) and out else out), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/institutions/supprimer', methods=['POST'])
+def institutions_supprimer():
+    email = verify_user_token(request)
+    if not email:
+        return jsonify({"error": "Non authentifié"}), 401
+    d = request.get_json(silent=True) or {}
+    if not d.get('id'):
+        return jsonify({"error": "id requis"}), 400
+    try:
+        r = requests.delete(f"{SUPABASE_URL}/rest/v1/institutions?id=eq.{int(d['id'])}",
+                            headers=_supabase_headers(), timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": r.text[:200]}), 500
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def _institutions_repertoire():
+    """Charge le répertoire (liste de dicts) depuis Supabase, ou []."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return []
+    try:
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/institutions?select=*&limit=1000",
+                         headers=_supabase_headers(), timeout=10)
+        return r.json() if r.status_code < 300 and isinstance(r.json(), list) else []
+    except Exception:
+        return []
+
+
 # ============== RÈGLEMENT DE TRAVAIL ==============
 _HORAIRE_MANIFEST = None
 
@@ -1014,7 +1095,8 @@ def reglement_generer():
         model_bytes = _fetch_horaire_model(mid)
     try:
         from reglement_gen import build_reglement, generer_doc_horaires
-        regl = build_reglement(payload, identity, template_bytes, model_bytes)
+        regl = build_reglement(payload, identity, template_bytes, model_bytes,
+                               repertoire=_institutions_repertoire())
         horaires = generer_doc_horaires(payload, identity)
     except Exception as e:
         return jsonify({"error": f"Échec de la génération : {e}"}), 500

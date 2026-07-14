@@ -68,6 +68,96 @@ def _jour(idx, lang):
         return str(idx)
 
 
+# Chaque institution du répertoire -> les jetons du modèle (Nom/Rue/N°/CP/Localité).
+INST_TOKENS = {
+    'caisse':            {'nom': 'Nom_1_institution_Inst_v1', 'rue': 'Rue_institution_Inst_v4',
+                          'no': 'No_de_la_maison_inst_Inst_v4', 'cp': 'Code_postal_Institutions_v4',
+                          'loc': 'Localité_institution_Inst_v4'},
+    'assurance':         {'nom': 'Nom_1_institution_Inst_v5', 'rue': 'Rue_institution_Inst_v3',
+                          'no': 'No_de_la_maison_inst_Inst_v3', 'cp': 'Code_postal_Institutions_v3',
+                          'loc': 'Localité_institution_Inst_v3'},
+    'fonds':             {'nom': 'Nom_1_institution_Inst_v4', 'rue': 'Rue_institution_Inst_v5',
+                          'no': 'No_de_la_maison_inst_Inst_v5', 'cp': 'Code_postal_Institutions_v5',
+                          'loc': 'Localité_institution_Inst_v5'},
+    'seppt':             {'nom': 'Nom_1_institution_Inst', 'rue': 'Rue_institution_Inst_v1',
+                          'no': 'No_de_la_maison_inst_Inst_v1', 'cp': 'Code_postal_Institutions_v1',
+                          'loc': 'Localité_institution_Inst_v1'},
+    'controle_lois':     {'rue': 'Rue_institution_Inst_v2', 'no': 'No_de_la_maison_inst_Inst_v2',
+                          'cp': 'Code_postal_Institutions_v2', 'loc': 'Localité_institution_Inst_v2'},
+    'controle_bienetre': {'rue': 'Rue_institution_Inst_v6', 'no': 'No_de_la_maison_inst_Inst_v6',
+                          'cp': 'Code_postal_Institutions_v6', 'loc': 'Localité_institution_Inst_v6'},
+}
+
+
+def _province_from_cp(cp):
+    try:
+        n = int(re.sub(r'\D', '', str(cp))[:4])
+    except (ValueError, TypeError):
+        return ''
+    if 1000 <= n <= 1299: return 'Bruxelles'
+    if 1300 <= n <= 1499: return 'Brabant wallon'
+    if 1500 <= n <= 1999 or 3000 <= n <= 3499: return 'Brabant flamand'
+    if 2000 <= n <= 2999: return 'Anvers'
+    if 3500 <= n <= 3999: return 'Limbourg'
+    if 4000 <= n <= 4999: return 'Liège'
+    if 5000 <= n <= 5999: return 'Namur'
+    if 6000 <= n <= 6599 or 7000 <= n <= 7999: return 'Hainaut'
+    if 6600 <= n <= 6999: return 'Luxembourg'
+    if 8000 <= n <= 8999: return 'Flandre occidentale'
+    if 9000 <= n <= 9999: return 'Flandre orientale'
+    return ''
+
+
+def _valeurs_institutions(payload, identity, repertoire):
+    """Remplit les jetons d'adresses d'institutions depuis le répertoire.
+    Assurance/caisse/SEPPT : par nom ; bureaux de contrôle : par province du client."""
+    out = {}
+    if not repertoire:
+        return out
+    idd = identity or {}
+    _, _, cp_cli, _ = _decoupe_adresse(idd)
+    prov = _province_from_cp(cp_cli)
+
+    def pose(inst, typ):
+        toks = INST_TOKENS.get(typ, {})
+        if toks.get('nom') and inst.get('nom'):
+            out[toks['nom']] = inst['nom']
+        if toks.get('rue'):
+            out[toks['rue']] = inst.get('rue') or ''
+        if toks.get('no'):
+            out[toks['no']] = inst.get('numero') or ''
+        if toks.get('cp'):
+            out[toks['cp']] = inst.get('code_postal') or ''
+        if toks.get('loc'):
+            out[toks['loc']] = inst.get('localite') or ''
+
+    def trouve_par_nom(typ, nom):
+        nom = (nom or '').lower().strip()
+        cands = [i for i in repertoire if (i.get('type') or '') == typ]
+        if nom:
+            for i in cands:
+                if (i.get('nom') or '').lower().strip() in nom or nom in (i.get('nom') or '').lower():
+                    return i
+        return cands[0] if len(cands) == 1 else None
+
+    for typ, champ in (('assurance', 'assurance_loi'), ('caisse', 'caisse_vacances'), ('seppt', 'seppt')):
+        inst = trouve_par_nom(typ, payload.get(champ))
+        if inst:
+            pose(inst, typ)
+    # fonds : s'il n'y en a qu'un, ou celui de la province
+    fonds = [i for i in repertoire if (i.get('type') or '') == 'fonds']
+    if len(fonds) == 1:
+        pose(fonds[0], 'fonds')
+    # bureaux de contrôle : par province du client (ou l'unique)
+    for typ in ('controle_lois', 'controle_bienetre'):
+        cands = [i for i in repertoire if (i.get('type') or '') == typ]
+        pick = next((i for i in cands if (i.get('province') or '') == prov and prov), None) \
+            or (cands[0] if len(cands) == 1 else None)
+        if pick:
+            pose(pick, typ)
+    return out
+
+
 def _decoupe_adresse(idd):
     """(adresse_1, adresse_2 BCE) -> (rue, n°, code postal, localité)."""
     adr1 = (idd.get('adresse_siege_social_1') or '').strip()
@@ -83,7 +173,7 @@ def _decoupe_adresse(idd):
     return rue, nomaison, cp, loc
 
 
-def _valeurs(payload, identity):
+def _valeurs(payload, identity, repertoire=None):
     """Correspondance jeton -> valeur. Ce qu'on n'a pas -> BLANK (à compléter)."""
     idd = identity or {}
     lang = 'NL' if str(payload.get('reglement_langue') or 'FR').upper() == 'NL' else 'FR'
@@ -144,6 +234,8 @@ def _valeurs(payload, identity):
         'cadre_min': '3',
         'cadre_max': ou(payload.get('max_journalier')) if payload.get('max_journalier') else '9',
     }
+    # Adresses des institutions depuis le répertoire (écrase les valeurs par défaut)
+    v.update({k: val for k, val in _valeurs_institutions(payload, identity, repertoire).items() if val})
     # Tout jeton non couvert -> BLANK (renseigné dynamiquement au remplissage)
     return v
 
@@ -350,16 +442,17 @@ def _ajouter_annexe_horaires(doc, schedules, langue='FR', titre_section=None):
         rt.font.size = Pt(9); rt.italic = True
 
 
-def build_reglement(payload, identity=None, template_bytes=None, model_bytes=None):
+def build_reglement(payload, identity=None, template_bytes=None, model_bytes=None, repertoire=None):
     """Remplit le modèle officiel et renvoie les bytes du .docx.
     template_bytes : le modèle FR/NL (jetons {{...}}) depuis Supabase Storage.
     model_bytes    : (optionnel) horaire sectoriel à ajouter en fin de document.
+    repertoire     : liste d'institutions (adresses) pour remplir Art. 2 & 66.
     """
     if not template_bytes:
         raise ValueError("Modèle de règlement introuvable (pas encore hébergé).")
     lang = 'NL' if str(payload.get('reglement_langue') or 'FR').upper() == 'NL' else 'FR'
     doc = Document(io.BytesIO(template_bytes))
-    _remplir_jetons(doc, _valeurs(payload, identity))
+    _remplir_jetons(doc, _valeurs(payload, identity, repertoire))
     # NB : les horaires générés vont dans un DOCUMENT SÉPARÉ (generer_doc_horaires),
     # plus le règlement lui-même, car ils peuvent faire des centaines de pages.
 
