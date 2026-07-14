@@ -1013,15 +1013,24 @@ def reglement_generer():
     if mid:
         model_bytes = _fetch_horaire_model(mid)
     try:
-        from reglement_gen import build_reglement
-        data = build_reglement(payload, identity, template_bytes, model_bytes)
+        from reglement_gen import build_reglement, generer_doc_horaires
+        regl = build_reglement(payload, identity, template_bytes, model_bytes)
+        horaires = generer_doc_horaires(payload, identity)
     except Exception as e:
         return jsonify({"error": f"Échec de la génération : {e}"}), 500
-    nom = 'reglement_' + (re.sub(r'\D', '', str(num or '')) or 'employeur') + '.docx'
-    return send_file(
-        io.BytesIO(data),
-        mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        as_attachment=True, download_name=nom)
+    base = re.sub(r'\D', '', str(num or '')) or 'employeur'
+    DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    if horaires:
+        # règlement + horaires (souvent très longs) dans un ZIP à 2 documents
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+            z.writestr(f'reglement_{base}.docx', regl)
+            z.writestr(f'horaires_{base}.docx', horaires)
+        buf.seek(0)
+        return send_file(buf, mimetype='application/zip', as_attachment=True,
+                         download_name=f'reglement_{base}.zip')
+    return send_file(io.BytesIO(regl), mimetype=DOCX, as_attachment=True,
+                     download_name=f'reglement_{base}.docx')
 
 # ============== INDIVIDUAL ENDPOINTS ==============
 @app.route('/fill-employer-form', methods=['POST'])

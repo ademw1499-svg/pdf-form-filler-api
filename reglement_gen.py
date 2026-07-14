@@ -227,27 +227,18 @@ def generer_horaires(payload, langue='FR', cible=2280, max_daily=480, min_block=
     noms = JOURS_NL if langue == 'NL' else JOURS_FR
     schedules = []
 
-    def rest_sets(n_off):
-        # Combinaisons de jours de repos À PRENDRE parmi les jours d'ouverture
-        # (les jours fermés sont de toute façon des repos). Repos consécutifs.
-        if n_off <= 0:
-            return [[]]
-        if n_off == 1:
-            return [[d] for d in ouverts]
-        res = []
-        for i in range(7):
-            run = [(i + k) % 7 for k in range(n_off)]
-            if all(d in ouverts for d in run):
-                res.append(run)
-        return res
+    from itertools import combinations
 
     def arrangements():
-        # Travail sur 6 jours puis 5 jours ; nb de repos = jours ouverts - jours travaillés
+        # 6 jours puis 5 jours ; repos = TOUTES les combinaisons possibles de jours
+        # de repos parmi les jours d'ouverture (pas seulement consécutives).
         n_open = len(ouverts)
         for n_work, label in ((6, '6 jours'), (5, '5 jours')):
             if n_open < n_work:
                 continue
-            for off_open in rest_sets(n_open - n_work):
+            n_off = n_open - n_work
+            combos = [()] if n_off <= 0 else combinations(ouverts, n_off)
+            for off_open in combos:
                 work = [x for x in ouverts if x not in off_open]
                 if len(work) != n_work:
                     continue
@@ -257,35 +248,45 @@ def generer_horaires(payload, langue='FR', cible=2280, max_daily=480, min_block=
 
     win_len = win_e - win_s
 
-    # Un passage unique : on génère TOUJOURS le 6 jours ET le 5 jours (quand le
-    # nombre de jours ouverts le permet). Pour chaque combinaison, on vise 38h ;
-    # si ça ne rentre pas dans la fenêtre, on remplit au mieux (total étiqueté).
     for work, off, mode in arrangements():
         n = len(work)
         daily_t = cible // n
         span_t = daily_t + (pause if daily_t >= SEUIL_PAUSE else 0)
         if span_t <= win_len:
-            daily = daily_t                                   # 38h pile
+            daily = daily_t                                   # temps plein pile
         elif (win_len - pause) >= min_block:
             daily = min(win_len - pause, max_daily)            # remplit la fenêtre
         else:
-            continue                                           # fenêtre trop petite
+            continue
         span = daily + (pause if daily >= SEUIL_PAUSE else 0)
-        st = win_s
-        while st + span <= win_e:
+        workset = set(work)
+        total = daily * n
+        approx = '' if total == cible else (
+            f" · {_duree(total)}/sem" if langue != 'NL' else f" · {_duree(total)}/week")
+
+        def ajoute(st):
             m_de, m_a, a_de, a_a = _decoupe_jour(st, daily, pause)
-            lignes = [(day, m_de, m_a, a_de, a_a) for day in sorted(work)]
+            # TOUS les 7 jours : jour presté = horaire, sinon repos (None)
+            lignes = [((day, m_de, m_a, a_de, a_a) if day in workset
+                       else (day, None, None, None, None)) for day in range(7)]
             repos = ', '.join(noms[o] for o in off)
-            total = daily * n
-            approx = '' if total == cible else (
-                f" · {_duree(total)}/sem" if langue != 'NL' else f" · {_duree(total)}/week")
             titre = (f"{mode} — {'repos' if langue != 'NL' else 'rust'} {repos}"
                      f" · {'début' if langue != 'NL' else 'start'} {_hhmm(st)}{approx}")
             schedules.append({'titre': titre, 'lignes': lignes, 'off': off,
                               'total': total, 'pause': pause if daily >= SEUIL_PAUSE else 0})
+
+        st, last = win_s, None
+        while st + span <= win_e:
+            ajoute(st); last = st
             if len(schedules) >= max_tables:
                 return schedules
             st += pas
+        # dernier horaire calé sur la fermeture (pour couvrir jusqu'à l'heure de fin)
+        close_st = win_e - span
+        if last is not None and close_st > last:
+            ajoute(close_st)
+            if len(schedules) >= max_tables:
+                return schedules
     return schedules
 
 
@@ -327,9 +328,15 @@ def _ajouter_annexe_horaires(doc, schedules, langue='FR'):
         _bordures(tbl)
         for i, t in enumerate(thd):
             tbl.rows[0].cells[i].paragraphs[0].add_run(t).bold = True
+        repos_txt = 'Repos' if langue != 'NL' else 'Rust'
         for day, m_de, m_a, a_de, a_a in sc['lignes']:
             c = tbl.add_row().cells
             c[0].paragraphs[0].add_run(noms[day].capitalize())
+            if m_de is None:                      # jour de repos : ligne vide (visible)
+                c[1].paragraphs[0].add_run(repos_txt)
+                for k in (2, 3, 4):
+                    c[k].paragraphs[0].add_run('—')
+                continue
             c[1].paragraphs[0].add_run(f"{_hhmm(m_de)} – {_hhmm(m_a)}")
             c[2].paragraphs[0].add_run(f"{_hhmm(m_a)} – {_hhmm(a_de)}" if a_de > m_a else '—')
             c[3].paragraphs[0].add_run(f"{_hhmm(a_de)} – {_hhmm(a_a)}" if a_a > a_de else '—')
@@ -351,16 +358,8 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
     lang = 'NL' if str(payload.get('reglement_langue') or 'FR').upper() == 'NL' else 'FR'
     doc = Document(io.BytesIO(template_bytes))
     _remplir_jetons(doc, _valeurs(payload, identity))
-
-    # Annexe : horaires-types générés depuis les heures d'ouverture (5j / 6j).
-    if payload.get('ouverture_debut') and payload.get('ouverture_fin'):
-        try:
-            mx = _min(f"{payload.get('max_journalier')}:00") if str(payload.get('max_journalier') or '').isdigit() else 480
-            scheds = generer_horaires(payload, langue=lang, max_daily=mx or 480)
-            if scheds:
-                _ajouter_annexe_horaires(doc, scheds, lang)
-        except Exception as e:
-            print(f"[REGLEMENT] génération horaires ignorée : {e}")
+    # NB : les horaires générés vont dans un DOCUMENT SÉPARÉ (generer_doc_horaires),
+    # plus le règlement lui-même, car ils peuvent faire des centaines de pages.
 
     if model_bytes:
         # Ajoute aussi l'horaire sectoriel choisi. Certains « modèles » sont en
@@ -376,5 +375,33 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
         except Exception as e:
             print(f"[REGLEMENT] annexe modèle ignorée (non joignable) : {e}")
 
+    out = io.BytesIO(); doc.save(out)
+    return out.getvalue()
+
+
+def generer_doc_horaires(payload, identity=None):
+    """Document Word SÉPARÉ contenant tous les horaires-types (5j + 6j, toutes les
+    combinaisons de jours de repos, tous les débuts par 30 min). Renvoie les bytes,
+    ou None si aucun horaire (pas d'heures d'ouverture)."""
+    lang = 'NL' if str(payload.get('reglement_langue') or 'FR').upper() == 'NL' else 'FR'
+    if not (payload.get('ouverture_debut') and payload.get('ouverture_fin')):
+        return None
+    try:
+        mx = _min(f"{payload.get('max_journalier')}:00") if str(payload.get('max_journalier') or '').isdigit() else 480
+        scheds = generer_horaires(payload, langue=lang, max_daily=mx or 480, max_tables=1500)
+    except Exception as e:
+        print(f"[REGLEMENT] génération horaires échouée : {e}")
+        return None
+    if not scheds:
+        return None
+    from docx.shared import Pt, RGBColor
+    doc = Document()
+    st = doc.styles['Normal']; st.font.name = 'Calibri'; st.font.size = Pt(10)
+    ti = doc.add_paragraph()
+    rt = ti.add_run(('HORAIRES DE TRAVAIL — ' if lang != 'NL' else 'UURROOSTERS — ')
+                    + (identity or {}).get('nom_societe', ''))
+    rt.bold = True; rt.font.size = Pt(16); rt.font.color.rgb = RGBColor(0x1c, 0x22, 0x44)
+    # on réutilise le rendu ; add_page_break() initial retiré n'est pas gênant ici
+    _ajouter_annexe_horaires(doc, scheds, lang)
     out = io.BytesIO(); doc.save(out)
     return out.getvalue()
