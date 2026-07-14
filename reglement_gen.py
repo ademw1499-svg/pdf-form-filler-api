@@ -303,20 +303,22 @@ def _bordures(tbl):
     tblPr.append(borders)
 
 
-def _ajouter_annexe_horaires(doc, schedules, langue='FR'):
+def _ajouter_annexe_horaires(doc, schedules, langue='FR', titre_section=None):
     from docx.shared import Pt, RGBColor
     noms = JOURS_NL if langue == 'NL' else JOURS_FR
     ACCENT = RGBColor(0x1c, 0x22, 0x44)
     doc.add_page_break()
     h = doc.add_paragraph()
-    r = h.add_run('ANNEXE — HORAIRES DE TRAVAIL POSSIBLES' if langue != 'NL' else 'BIJLAGE — MOGELIJKE UURROOSTERS')
+    entete = titre_section or ('ANNEXE — HORAIRES DE TRAVAIL POSSIBLES' if langue != 'NL'
+                               else 'BIJLAGE — MOGELIJKE UURROOSTERS')
+    r = h.add_run(entete)
     r.bold = True; r.font.size = Pt(14); r.font.color.rgb = ACCENT
     intro = doc.add_paragraph()
     ri = intro.add_run(
-        "Horaires-types compatibles avec les heures d'ouverture, en 38h/semaine. "
+        "Horaires-types compatibles avec les heures d'ouverture. "
         "L'employeur communique l'horaire applicable au travailleur (à valider juridiquement)."
         if langue != 'NL' else
-        "Mogelijke uurroosters binnen de openingsuren, 38u/week. Juridisch te valideren.")
+        "Mogelijke uurroosters binnen de openingsuren. Juridisch te valideren.")
     ri.italic = True; ri.font.size = Pt(9)
     thd = (['Jour', 'Matin', 'Pause', 'Après-midi', 'Durée'] if langue != 'NL'
            else ['Dag', 'Voormiddag', 'Pauze', 'Namiddag', 'Duur'])
@@ -381,27 +383,50 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
 
 def generer_doc_horaires(payload, identity=None):
     """Document Word SÉPARÉ contenant tous les horaires-types (5j + 6j, toutes les
-    combinaisons de jours de repos, tous les débuts par 30 min). Renvoie les bytes,
-    ou None si aucun horaire (pas d'heures d'ouverture)."""
+    combinaisons de jours de repos, tous les débuts par 30 min). Si une 2e CP
+    (employés) avec un temps plein différent est fournie, on ajoute une section
+    distincte pour les employés. Renvoie les bytes, ou None si pas d'horaires."""
     lang = 'NL' if str(payload.get('reglement_langue') or 'FR').upper() == 'NL' else 'FR'
     if not (payload.get('ouverture_debut') and payload.get('ouverture_fin')):
         return None
-    try:
-        mx = _min(f"{payload.get('max_journalier')}:00") if str(payload.get('max_journalier') or '').isdigit() else 480
-        scheds = generer_horaires(payload, langue=lang, max_daily=mx or 480, max_tables=1500)
-    except Exception as e:
-        print(f"[REGLEMENT] génération horaires échouée : {e}")
-        return None
-    if not scheds:
-        return None
+    mx = _min(f"{payload.get('max_journalier')}:00") if str(payload.get('max_journalier') or '').isdigit() else 480
+    mx = mx or 480
+
+    def heures_min(v, defaut=2280):
+        try:
+            return int(round(float(str(v).replace(',', '.')) * 60))
+        except (ValueError, TypeError):
+            return defaut
+
+    # Catégorie ouvriers (CP principale) + éventuellement employés (2e CP)
+    cats = [('ouvriers', payload.get('commission_paritaire'), heures_min(payload.get('heures_ouvrier'), 2280))]
+    cp_e = str(payload.get('cp_employe') or '').strip()
+    h_e = payload.get('heures_employe')
+    if cp_e or h_e:
+        cats.append(('employés', cp_e or payload.get('commission_paritaire'), heures_min(h_e, 2280)))
+
     from docx.shared import Pt, RGBColor
     doc = Document()
-    st = doc.styles['Normal']; st.font.name = 'Calibri'; st.font.size = Pt(10)
+    stl = doc.styles['Normal']; stl.font.name = 'Calibri'; stl.font.size = Pt(10)
     ti = doc.add_paragraph()
     rt = ti.add_run(('HORAIRES DE TRAVAIL — ' if lang != 'NL' else 'UURROOSTERS — ')
                     + (identity or {}).get('nom_societe', ''))
     rt.bold = True; rt.font.size = Pt(16); rt.font.color.rgb = RGBColor(0x1c, 0x22, 0x44)
-    # on réutilise le rendu ; add_page_break() initial retiré n'est pas gênant ici
-    _ajouter_annexe_horaires(doc, scheds, lang)
+
+    total_tables = 0
+    for cat, cp, cible in cats:
+        try:
+            scheds = generer_horaires(payload, langue=lang, cible=cible, max_daily=mx, max_tables=1500)
+        except Exception as e:
+            print(f"[REGLEMENT] horaires {cat} échoués : {e}"); continue
+        if not scheds:
+            continue
+        cph = f" (CP {re.sub(r'[^0-9.]', '', str(cp))})" if cp else ''
+        titre = (f"{cat.upper()}{cph} — {_duree(cible)}/semaine" if lang != 'NL'
+                 else f"{cat.upper()}{cph} — {_duree(cible)}/week")
+        _ajouter_annexe_horaires(doc, scheds, lang, titre_section=titre)
+        total_tables += len(scheds)
+    if total_tables == 0:
+        return None
     out = io.BytesIO(); doc.save(out)
     return out.getvalue()
