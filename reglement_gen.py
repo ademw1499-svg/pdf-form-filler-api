@@ -149,12 +149,15 @@ def _valeurs(payload, identity):
 
 
 def _remplir_jetons(doc, valeurs):
-    """Remplace {{X}} par la valeur (ou BLANK) dans chaque run de texte."""
+    """Remplace {{X}} par la valeur (ou BLANK) et retire le placeholder « [date] »."""
     for t in doc.element.body.iter(qn('w:t')):
-        s = t.text or ''
+        s = o = t.text or ''
+        if '[date]' in s:
+            s = s.replace('[date]', '')
         if '{{' in s:
-            t.text = re.sub(r'\{\{(\w+)\}\}',
-                            lambda m: str(valeurs.get(m.group(1), BLANK)), s)
+            s = re.sub(r'\{\{(\w+)\}\}', lambda m: str(valeurs.get(m.group(1), BLANK)), s)
+        if s != o:
+            t.text = s
 
 
 def _min(hhmm):
