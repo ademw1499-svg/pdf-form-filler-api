@@ -98,14 +98,22 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
     _remplir_jetons(doc, _valeurs(payload, identity))
 
     if model_bytes:
-        # Ajoute l'horaire sectoriel choisi à la fin (après les annexes du modèle).
-        from docxcompose.composer import Composer
-        doc.add_page_break()
-        buf = io.BytesIO(); doc.save(buf); buf.seek(0)
-        comp = Composer(Document(buf))
-        comp.append(Document(io.BytesIO(model_bytes)))
-        out = io.BytesIO(); comp.save(out)
-        return out.getvalue()
+        # Ajoute l'horaire sectoriel choisi à la fin. Certains « modèles » sont en
+        # réalité des fichiers Excel (non joignables) : dans ce cas on n'échoue
+        # PAS — on renvoie le règlement rempli sans cette annexe.
+        try:
+            from docxcompose.composer import Composer
+            doc.add_page_break()
+            buf = io.BytesIO(); doc.save(buf); buf.seek(0)
+            comp = Composer(Document(buf))
+            comp.append(Document(io.BytesIO(model_bytes)))
+            out = io.BytesIO(); comp.save(out)
+            return out.getvalue()
+        except Exception as e:
+            print(f"[REGLEMENT] annexe horaire ignorée (modèle non joignable) : {e}")
+            # on repart du document rempli sans le saut de page ajouté
+            doc = Document(io.BytesIO(template_bytes))
+            _remplir_jetons(doc, _valeurs(payload, identity))
 
     out = io.BytesIO(); doc.save(out)
     return out.getvalue()
