@@ -109,6 +109,142 @@ def _remplir_jetons(doc, valeurs):
                             lambda m: str(valeurs.get(m.group(1), BLANK)), s)
 
 
+def _min(hhmm):
+    try:
+        h, m = str(hhmm).split(':')[:2]
+        return int(h) * 60 + int(m)
+    except Exception:
+        return None
+
+
+def _hhmm(minutes):
+    minutes %= 1440
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _duree(m):
+    h, mm = divmod(m, 60)
+    return f"{h}h{mm:02d}" if mm else f"{h}h"
+
+
+def _jours_ouverts(jd, jf):
+    """Plage de jours contiguë de jd à jf (index 0=lundi), gère le passage de semaine."""
+    try:
+        a, b = int(jd), int(jf)
+    except (ValueError, TypeError):
+        return list(range(7))
+    out, i = [], a
+    for _ in range(7):
+        out.append(i % 7)
+        if i % 7 == b % 7:
+            break
+        i += 1
+    return out
+
+
+def generer_horaires(payload, langue='FR', cible=2280, max_daily=480, min_block=180, max_tables=30):
+    """Propose des horaires-types valides à partir des heures d'ouverture.
+    Pour 5 et 6 jours de travail, avec différentes combinaisons de jours de repos.
+    Chaque jour presté = même bloc continu (respecte d'office les 11h de repos)."""
+    d, f = _min(payload.get('ouverture_debut')), _min(payload.get('ouverture_fin'))
+    if d is None or f is None:
+        return []
+    ouverts = _jours_ouverts(payload.get('ouverture_jour_debut', 0), payload.get('ouverture_jour_fin', 6))
+    if len(ouverts) < 5:
+        return []
+    win_s = d
+    win_e = f if f > d else f + 1440           # ouverture de nuit (ex. 05:00->03:00)
+    noms = JOURS_NL if langue == 'NL' else JOURS_FR
+    schedules = []
+
+    def arrangements():
+        # 6 jours : 1 jour de repos ; 5 jours : 2 jours de repos consécutifs
+        if len(ouverts) >= 6:
+            for off in ouverts:
+                work = [x for x in ouverts if x != off]
+                if len(work) == 6:
+                    yield work, [off], ('6 jours' if langue != 'NL' else '6 dagen')
+        for i in range(7):
+            pair = [i % 7, (i + 1) % 7]
+            if pair[0] in ouverts and pair[1] in ouverts:
+                work = [x for x in ouverts if x not in pair]
+                if len(work) == 5:
+                    yield work, pair, ('5 jours' if langue != 'NL' else '5 dagen')
+
+    vus = set()
+    for work, off, mode in arrangements():
+        n = len(work)
+        daily = cible // n
+        if daily > max_daily or daily < min_block:
+            continue
+        # quelques heures de début possibles (toutes les 2h, max 3 variantes)
+        starts, s = [], win_s
+        while s + daily <= win_e and len(starts) < 3:
+            starts.append(s); s += 120
+        for si, st in enumerate(starts):
+            cle = (tuple(sorted(work)), st, daily)
+            if cle in vus:
+                continue
+            vus.add(cle)
+            lignes = [(day, st, st + daily) for day in sorted(work)]
+            repos = ', '.join(noms[o] for o in off)
+            titre = (f"{mode} — {'repos' if langue != 'NL' else 'rust'} {repos}"
+                     + (f" ({'début' if langue != 'NL' else 'start'} {_hhmm(st)})" if si else ""))
+            schedules.append({'titre': titre, 'lignes': lignes, 'off': off, 'total': daily * n})
+            if len(schedules) >= max_tables:
+                return schedules
+    return schedules
+
+
+def _bordures(tbl):
+    """Applique des bordures fines à un tableau (sans dépendre d'un style nommé)."""
+    from docx.oxml import OxmlElement
+    tblPr = tbl._tbl.tblPr
+    borders = OxmlElement('w:tblBorders')
+    for edge in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
+        e = OxmlElement(f'w:{edge}')
+        e.set(qn('w:val'), 'single'); e.set(qn('w:sz'), '4')
+        e.set(qn('w:space'), '0'); e.set(qn('w:color'), 'BFC4D6')
+        borders.append(e)
+    tblPr.append(borders)
+
+
+def _ajouter_annexe_horaires(doc, schedules, langue='FR'):
+    from docx.shared import Pt, RGBColor
+    noms = JOURS_NL if langue == 'NL' else JOURS_FR
+    ACCENT = RGBColor(0x1c, 0x22, 0x44)
+    doc.add_page_break()
+    h = doc.add_paragraph()
+    r = h.add_run('ANNEXE — HORAIRES DE TRAVAIL POSSIBLES' if langue != 'NL' else 'BIJLAGE — MOGELIJKE UURROOSTERS')
+    r.bold = True; r.font.size = Pt(14); r.font.color.rgb = ACCENT
+    intro = doc.add_paragraph()
+    ri = intro.add_run(
+        "Horaires-types compatibles avec les heures d'ouverture, en 38h/semaine. "
+        "L'employeur communique l'horaire applicable au travailleur (à valider juridiquement)."
+        if langue != 'NL' else
+        "Mogelijke uurroosters binnen de openingsuren, 38u/week. Juridisch te valideren.")
+    ri.italic = True; ri.font.size = Pt(9)
+    thd = ['Jour', 'De', 'À', 'Durée'] if langue != 'NL' else ['Dag', 'Van', 'Tot', 'Duur']
+    for sc in schedules:
+        p = doc.add_paragraph()
+        rp = p.add_run(sc['titre']); rp.bold = True; rp.font.size = Pt(11); rp.font.color.rgb = ACCENT
+        p.paragraph_format.space_before = Pt(10); p.paragraph_format.space_after = Pt(2)
+        tbl = doc.add_table(rows=1, cols=4)
+        _bordures(tbl)
+        for i, t in enumerate(thd):
+            tbl.rows[0].cells[i].paragraphs[0].add_run(t).bold = True
+        for day, st, en in sc['lignes']:
+            c = tbl.add_row().cells
+            c[0].paragraphs[0].add_run(noms[day].capitalize())
+            c[1].paragraphs[0].add_run(_hhmm(st))
+            c[2].paragraphs[0].add_run(_hhmm(en))
+            c[3].paragraphs[0].add_run(_duree(en - st))
+        tot = doc.add_paragraph()
+        rt = tot.add_run(('Total : ' if langue != 'NL' else 'Totaal: ') + _duree(sc['total']) + ' / '
+                         + ('semaine' if langue != 'NL' else 'week'))
+        rt.font.size = Pt(9); rt.italic = True
+
+
 def build_reglement(payload, identity=None, template_bytes=None, model_bytes=None):
     """Remplit le modèle officiel et renvoie les bytes du .docx.
     template_bytes : le modèle FR/NL (jetons {{...}}) depuis Supabase Storage.
@@ -116,13 +252,23 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
     """
     if not template_bytes:
         raise ValueError("Modèle de règlement introuvable (pas encore hébergé).")
+    lang = 'NL' if str(payload.get('reglement_langue') or 'FR').upper() == 'NL' else 'FR'
     doc = Document(io.BytesIO(template_bytes))
     _remplir_jetons(doc, _valeurs(payload, identity))
 
+    # Annexe : horaires-types générés depuis les heures d'ouverture (5j / 6j).
+    if payload.get('ouverture_debut') and payload.get('ouverture_fin'):
+        try:
+            mx = _min(f"{payload.get('max_journalier')}:00") if str(payload.get('max_journalier') or '').isdigit() else 480
+            scheds = generer_horaires(payload, langue=lang, max_daily=mx or 480)
+            if scheds:
+                _ajouter_annexe_horaires(doc, scheds, lang)
+        except Exception as e:
+            print(f"[REGLEMENT] génération horaires ignorée : {e}")
+
     if model_bytes:
-        # Ajoute l'horaire sectoriel choisi à la fin. Certains « modèles » sont en
-        # réalité des fichiers Excel (non joignables) : dans ce cas on n'échoue
-        # PAS — on renvoie le règlement rempli sans cette annexe.
+        # Ajoute aussi l'horaire sectoriel choisi. Certains « modèles » sont en
+        # réalité des fichiers Excel (non joignables) -> on n'échoue PAS.
         try:
             from docxcompose.composer import Composer
             doc.add_page_break()
@@ -132,10 +278,7 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
             out = io.BytesIO(); comp.save(out)
             return out.getvalue()
         except Exception as e:
-            print(f"[REGLEMENT] annexe horaire ignorée (modèle non joignable) : {e}")
-            # on repart du document rempli sans le saut de page ajouté
-            doc = Document(io.BytesIO(template_bytes))
-            _remplir_jetons(doc, _valeurs(payload, identity))
+            print(f"[REGLEMENT] annexe modèle ignorée (non joignable) : {e}")
 
     out = io.BytesIO(); doc.save(out)
     return out.getvalue()
