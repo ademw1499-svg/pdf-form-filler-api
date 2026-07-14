@@ -20,6 +20,42 @@ BLANK = '…………'
 JOURS_FR = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche']
 JOURS_NL = ['maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag', 'zondag']
 
+# Personne de confiance + conseiller harcèlement selon le SEPPT (source : listes
+# PersoProject — Excel « personne de confiance RT » + Attentia + Arista).
+SEPPT_PDC = {
+    'securex':  {'pc': 'Delphine PIETERS (0800/100.59)',
+                 'harc': 'Delphine PIETERS (0800/100.59 — Health_safety@securex.be)'},
+    'mensura':  {'pc': 'Benoit VAN TICHELEN et Dominique DEHON (02/549.71.07 et 011/26.40.90)',
+                 'harc': 'Benoit VAN TICHELEN (02/549.71.07)'},
+    'cesi':     {'pc': 'Tina SCHOLIERS (02/761.17.74)',
+                 'harc': 'Mme MOREAU (02/771.00.25)'},
+    'idewe':    {'pc': 'N° général (02/237.33.24)',
+                 'harc': 'N° général (02/237.33.24)'},
+    'proviko':  {'pc': 'Suzi Broupkmans (02/250.00.57)',
+                 'harc': 'Suzi Broupkmans (02/250.00.57)'},
+    'mediwet':  {'pc': 'Peter VAN SLEMBROUCK (09/221.06.07)',
+                 'harc': 'Peter VAN SLEMBROUCK (09/221.06.07)'},
+    'adhesia':  {'pc': 'N° général (02/511.06.86)',
+                 'harc': 'N° général (02/511.06.86)'},
+    'liantis':  {'pc': "Ana Rodriguez Sio — L'équipe psychosociale (078/150.888)",
+                 'harc': "L'équipe psychosociale (078/150.888)"},
+    'attentia': {'pc': "L'équipe des conseillers en prévention aspects psychosociaux "
+                       "(02/738 75 31 — psy.prev@attentia.be)",
+                 'harc': "L'équipe des conseillers en prévention aspects psychosociaux "
+                         "(02/738 75 31 — psy.prev@attentia.be)"},
+    'arista':   {'pc': 'Arista — conseiller psychosocial (02 533 74 11 — arista@arista.be)',
+                 'harc': 'Arista — conseiller psychosocial (02 533 74 11 — arista@arista.be)'},
+}
+
+
+def _pdc_du_seppt(seppt):
+    """Retourne {pc, harc} de la personne de confiance selon le SEPPT, ou None."""
+    s = (seppt or '').lower()
+    for cle, val in SEPPT_PDC.items():
+        if cle in s:
+            return val
+    return None
+
 
 def _jour(idx, lang):
     """Nom de jour localisé depuis un index 0=lundi (ou un nom déjà écrit)."""
@@ -94,8 +130,10 @@ def _valeurs(payload, identity):
         'ps_lieu1': ou(payload.get('premiers_soins_lieux')),
         'ps_nom2': BLANK, 'ps_lieu2': BLANK,
         'boite_secours': ou(payload.get('boite_secours_emplacement')),
-        'personne_confiance': ou(payload.get('personne_de_confiance')),
-        'harcelement': BLANK,
+        # Personne de confiance + harcèlement : selon le SEPPT (saisie manuelle prioritaire)
+        'personne_confiance': ou(payload.get('personne_de_confiance')
+                                 or (_pdc_du_seppt(payload.get('seppt')) or {}).get('pc')),
+        'harcelement': ou((_pdc_du_seppt(payload.get('seppt')) or {}).get('harc')),
         # sièges d'exploitation : siège social par défaut (1 seul pour la plupart des clients)
         'sieges_exploitation': ou(' — '.join(x for x in [adr1, (idd.get('adresse_siege_social_2') or '').strip()] if x)),
         # --- Cadre horaire (Article 10 §2) depuis les heures d'ouverture ---
