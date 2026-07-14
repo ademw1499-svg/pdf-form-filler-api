@@ -88,6 +88,16 @@ def _valeurs(payload, identity):
         # --- Noms d'institutions sans ambiguïté dans le modèle ---
         'Nom_1_institution_Inst_v5': ou(payload.get('assurance_loi')),   # assurance-loi
         'Nom_1_institution_Inst_v1': ou(payload.get('caisse_vacances')),  # caisse de vacances
+        'Nom_1_institution_Inst_v2': ou(payload.get('seppt')),           # conseiller prévention externe (SEPPT)
+        # --- Annexe 4 (bien-être) + Annexe 5 (lieux) ---
+        'ps_nom1': ou(payload.get('premiers_soins_noms')),
+        'ps_lieu1': ou(payload.get('premiers_soins_lieux')),
+        'ps_nom2': BLANK, 'ps_lieu2': BLANK,
+        'boite_secours': ou(payload.get('boite_secours_emplacement')),
+        'personne_confiance': ou(payload.get('personne_de_confiance')),
+        'harcelement': BLANK,
+        # sièges d'exploitation : siège social par défaut (1 seul pour la plupart des clients)
+        'sieges_exploitation': ou(' — '.join(x for x in [adr1, (idd.get('adresse_siege_social_2') or '').strip()] if x)),
         # --- Cadre horaire (Article 10 §2) depuis les heures d'ouverture ---
         'cadre_debut': ou(payload.get('ouverture_debut')),
         'cadre_fin': ou(payload.get('ouverture_fin')),
