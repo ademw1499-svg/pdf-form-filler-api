@@ -389,6 +389,23 @@ class TestBuildReglement:
         i = txt.find('adres van de verschillende')
         assert 'Paddegatstraat 85A, 1880 Kapelle-op-den-Bos' in txt[i:i + 120]  # annexe 5
 
+    def test_fr_sans_fuite_de_champ(self):
+        # le modèle FR a aussi des littéraux « Nom (Em) » / « No ONSS (Em) » -> doivent
+        # être remplis (aucun nom de champ brut ne doit rester dans le doc FR).
+        identity = {'nom_societe': 'ACME SRL', 'forme_juridique': 'SRL',
+                    'adresse_siege_social_1': 'Rue Test 5', 'adresse_siege_social_2': '1000 Bruxelles'}
+        txt = _texte(R.build_reglement({'reglement_langue': 'FR', 'num_onss': '1234567-89'},
+                                       identity, _tpl(TPL_FR)))
+        assert not re.search(r'[A-Za-zÀ-ÿ ]{2,}\((?:Em|Emp|Inst)[^)]*\)', txt)
+        assert 'ACME SRL' in txt
+
+    def test_seppt_remplit_personne_confiance_fr_et_nl(self):
+        # un SEPPT connu -> la personne de confiance doit apparaître, en FR ET en NL
+        for lang, tpl in (('FR', TPL_FR), ('NL', TPL_NL)):
+            txt = _texte(R.build_reglement({'reglement_langue': lang, 'seppt': 'Mensura'},
+                                           {'nom_societe': 'X'}, _tpl(tpl)))
+            assert 'VAN TICHELEN' in txt, f"personne de confiance absente en {lang}"
+
     # ----- cas limites -----
     def test_payload_vide_ne_plante_pas(self):
         out = R.build_reglement({}, None, _tpl(TPL_FR))

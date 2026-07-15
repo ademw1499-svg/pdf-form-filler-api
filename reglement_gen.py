@@ -569,12 +569,12 @@ def _remplir_cameras(doc, nb, lieux, lang='FR'):
     return False
 
 
-def _remplir_placeholders_nl(doc, valeurs):
-    """Le modèle NL contient, à quelques endroits, du TEXTE LITTÉRAL « Nom (Em) »,
-    « No ONSS (Em) » et — à l'annexe 5 — « Rue (Em), No de la maison (Em) Code postal
-    (Em) Localité (Em) » qui n'ont jamais été convertis en jetons au prétraitement
-    (contrairement au modèle FR). Sans ça, ces noms de champs s'affichent bruts dans
-    le document. On les remplit ici. No-op sur le modèle FR (aucun de ces littéraux)."""
+def _remplir_placeholders_litteraux(doc, valeurs):
+    """Les modèles FR ET NL contiennent, à quelques endroits, du TEXTE LITTÉRAL
+    « Nom (Em) », « No ONSS (Em) » et — annexe 5 du NL — « Rue (Em), No de la maison
+    (Em) Code postal (Em) Localité (Em) » qui n'ont jamais été convertis en jetons au
+    prétraitement. Sans ça, ces noms de champs s'affichent bruts. On les remplit ici.
+    Chaque branche est un no-op là où le littéral n'existe pas."""
     nom = valeurs.get('Nom_Em', BLANK)
     onss = valeurs.get('No_ONSS_Em', BLANK)
     expl = valeurs.get('sieges_exploitation', BLANK)
@@ -600,6 +600,28 @@ def _remplir_placeholders_nl(doc, valeurs):
                     t = t.replace(lit, str(val))
             if t != r.text:
                 r.text = t
+
+    # Annexe 4 bien-être du modèle NL : pas de jetons, juste des labels « … is (zijn) : »
+    # (le modèle FR utilise des jetons -> ces ancres NL n'y existent pas, no-op).
+    _ajouter_apres_label(doc, 'preventieadviseur(s) is (zijn)', valeurs.get('personne_confiance'))
+    _ajouter_apres_label(doc, 'Geweld, pesterijen en ongewenst seksueel gedrag op het werk is (zijn)',
+                         valeurs.get('harcelement'))
+
+
+def _ajouter_apres_label(doc, ancre, valeur):
+    """Ajoute `valeur` à la fin du 1er paragraphe contenant `ancre` (label NL qui finit
+    par « : »). No-op si `valeur` est vide/BLANK, si l'ancre est absente, ou si la valeur
+    est déjà présente."""
+    if not valeur or valeur == BLANK:
+        return
+    valeur = str(valeur)
+    for p in doc.paragraphs:
+        full = ''.join(r.text or '' for r in p.runs)
+        if ancre in full:
+            if valeur in full:
+                return
+            p.add_run(' ' + valeur)
+            return
 
 
 def build_reglement(payload, identity=None, template_bytes=None, model_bytes=None,
@@ -650,9 +672,8 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
     lieux_cam = (payload.get('cameras_emplacement') or '').strip() or (
         ('Néant' if lang != 'NL' else 'Geen') if nb_cam in ('0', '') else BLANK)
     _remplir_cameras(doc, nb_cam, lieux_cam, lang)
-    # Modèle NL : remplit les placeholders littéraux résiduels (Nom, No ONSS, annexe 5)
-    if lang == 'NL':
-        _remplir_placeholders_nl(doc, _valeurs(payload, identity, repertoire))
+    # FR + NL : remplit les placeholders littéraux résiduels (Nom, No ONSS, annexe 5 NL)
+    _remplir_placeholders_litteraux(doc, _valeurs(payload, identity, repertoire))
     # NB : les horaires générés vont dans un DOCUMENT SÉPARÉ (generer_doc_horaires),
     # plus le règlement lui-même, car ils peuvent faire des centaines de pages.
 
