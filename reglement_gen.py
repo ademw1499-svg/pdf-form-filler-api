@@ -517,7 +517,7 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
     }
     _remplir_jetons(doc, _valeurs(payload, identity, repertoire), sequentiels)
     # Annexe 7 — caméras de surveillance (défaut 0 si le client n'en a pas)
-    nb_cam = str(payload.get('nombre_cameras') or '').strip() or '0'
+    nb_cam = str(payload.get('nombre_cameras') or payload.get('cameras') or '').strip() or '0'
     lieux_cam = (payload.get('cameras_emplacement') or '').strip() or (
         ('Néant' if lang != 'NL' else 'Geen') if nb_cam in ('0', '') else BLANK)
     _remplir_cameras(doc, nb_cam, lieux_cam, lang)
