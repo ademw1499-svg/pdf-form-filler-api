@@ -240,14 +240,32 @@ def _valeurs(payload, identity, repertoire=None):
     return v
 
 
-def _remplir_jetons(doc, valeurs):
-    """Remplace {{X}} par la valeur (ou BLANK) et retire le placeholder « [date] »."""
+def _remplir_jetons(doc, valeurs, sequentiels=None):
+    """Remplace {{X}} par la valeur (ou BLANK) et retire le placeholder « [date] ».
+
+    `sequentiels` : {jeton: [val1, val2, …]} — pour les jetons qui se répètent et
+    doivent prendre une valeur DIFFÉRENTE à chaque occurrence (ex. la commission
+    paritaire, utilisée pour la ligne ouvrier PUIS la ligne employé). La 1ʳᵉ
+    occurrence prend val1, la 2ᵉ val2, etc. ; au-delà on garde la dernière.
+    """
+    sequentiels = sequentiels or {}
+    compteurs = {}
+
+    def _rep(m):
+        k = m.group(1)
+        if k in sequentiels:
+            vals = sequentiels[k]
+            i = compteurs.get(k, 0)
+            compteurs[k] = i + 1
+            return str(vals[i] if i < len(vals) else vals[-1]) if vals else BLANK
+        return str(valeurs.get(k, BLANK))
+
     for t in doc.element.body.iter(qn('w:t')):
         s = o = t.text or ''
         if '[date]' in s:
             s = s.replace('[date]', '')
         if '{{' in s:
-            s = re.sub(r'\{\{(\w+)\}\}', lambda m: str(valeurs.get(m.group(1), BLANK)), s)
+            s = re.sub(r'\{\{(\w+)\}\}', _rep, s)
         if s != o:
             t.text = s
 
@@ -452,7 +470,17 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
         raise ValueError("Modèle de règlement introuvable (pas encore hébergé).")
     lang = 'NL' if str(payload.get('reglement_langue') or 'FR').upper() == 'NL' else 'FR'
     doc = Document(io.BytesIO(template_bytes))
-    _remplir_jetons(doc, _valeurs(payload, identity, repertoire))
+    # Commission paritaire : la MÊME balise sert pour la ligne ouvrier ET la ligne
+    # employé -> remplacement positionnel (1ʳᵉ occ. = ouvrier, 2ᵉ occ. = employé).
+    cp_ouv = re.sub(r'\D', '', str(payload.get('commission_paritaire') or '')) or BLANK
+    cp_emp = re.sub(r'\D', '', str(payload.get('cp_employe') or '')) or BLANK
+    den_ouv = (payload.get('cp_ouvrier_denomination') or '').strip() or BLANK
+    den_emp = (payload.get('cp_employe_denomination') or '').strip() or BLANK
+    sequentiels = {
+        'Commission_paritaire_Em': [cp_ouv, cp_emp],
+        'Commission_paritaire_Em_v1': [den_ouv, den_emp],
+    }
+    _remplir_jetons(doc, _valeurs(payload, identity, repertoire), sequentiels)
     # NB : les horaires générés vont dans un DOCUMENT SÉPARÉ (generer_doc_horaires),
     # plus le règlement lui-même, car ils peuvent faire des centaines de pages.
 
