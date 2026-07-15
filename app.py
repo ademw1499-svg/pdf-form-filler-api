@@ -1056,6 +1056,85 @@ def _institutions_repertoire():
         return []
 
 
+# ============== RÉPERTOIRE DES COMMISSIONS PARITAIRES ==============
+# Par CP : n° + dénomination + temps plein (heures/semaine). Sert à pré-remplir
+# automatiquement le temps plein dans le règlement dès qu'on tape le n° de CP.
+CP_COLS = ['cp', 'denomination', 'heures_semaine', 'note']
+
+
+@app.route('/commissions', methods=['GET'])
+def commissions_liste():
+    email = verify_user_token(request)
+    if not email:
+        return jsonify({"error": "Non authentifié"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    try:
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/commissions?select=*&order=cp.asc&limit=1000",
+                         headers=_supabase_headers(), timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": r.text[:200]}), 500
+        return jsonify(r.json()), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/commissions/upsert', methods=['POST'])
+def commissions_upsert():
+    email = verify_user_token(request)
+    if not email:
+        return jsonify({"error": "Non authentifié"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    d = request.get_json(silent=True) or {}
+    row = {k: d[k] for k in CP_COLS if k in d}
+    row['updated_at'] = datetime.utcnow().isoformat()
+    hdr = {**_supabase_headers(), 'Content-Type': 'application/json', 'Prefer': 'return=representation'}
+    try:
+        if d.get('id'):
+            r = requests.patch(f"{SUPABASE_URL}/rest/v1/commissions?id=eq.{int(d['id'])}",
+                               json=row, headers=hdr, timeout=10)
+        else:
+            if not str(row.get('cp') or '').strip():
+                return jsonify({"error": "n° CP requis"}), 400
+            r = requests.post(f"{SUPABASE_URL}/rest/v1/commissions", json=row, headers=hdr, timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": r.text[:200]}), 500
+        out = r.json()
+        return jsonify(out[0] if isinstance(out, list) and out else out), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/commissions/supprimer', methods=['POST'])
+def commissions_supprimer():
+    email = verify_user_token(request)
+    if not email:
+        return jsonify({"error": "Non authentifié"}), 401
+    d = request.get_json(silent=True) or {}
+    if not d.get('id'):
+        return jsonify({"error": "id requis"}), 400
+    try:
+        r = requests.delete(f"{SUPABASE_URL}/rest/v1/commissions?id=eq.{int(d['id'])}",
+                            headers=_supabase_headers(), timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": r.text[:200]}), 500
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def _commissions_repertoire():
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return []
+    try:
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/commissions?select=*&limit=1000",
+                         headers=_supabase_headers(), timeout=10)
+        return r.json() if r.status_code < 300 and isinstance(r.json(), list) else []
+    except Exception:
+        return []
+
+
 # ============== RÈGLEMENT DE TRAVAIL ==============
 _HORAIRE_MANIFEST = None
 

@@ -290,6 +290,20 @@ def _duree(m):
     return f"{h}h{mm:02d}" if mm else f"{h}h"
 
 
+def _hebdo_min(v, defaut=2280):
+    """Temps plein hebdomadaire -> minutes. Accepte « 36h30 », « 36,5 », « 38 »."""
+    s = str(v or '').strip().lower().replace(',', '.')
+    if not s:
+        return defaut
+    m = re.match(r'^(\d+)\s*h\s*(\d{1,2})?$', s)      # « 36h30 » / « 38h »
+    if m:
+        return int(m.group(1)) * 60 + int(m.group(2) or 0)
+    try:
+        return int(round(float(s) * 60))              # « 36.5 » / « 38 »
+    except ValueError:
+        return defaut
+
+
 def _jours_ouverts(jd, jf):
     """Plage de jours contiguë de jd à jf (index 0=lundi), gère le passage de semaine."""
     try:
@@ -323,15 +337,23 @@ def _decoupe_jour(st, work, pause):
 
 
 def generer_horaires(payload, langue='FR', cible=2280, max_daily=480, min_block=180,
-                     pause=30, pas=30, max_tables=600):
+                     pause=30, pas=30, max_tables=600,
+                     debut=None, fin=None, jour_debut=None, jour_fin=None):
     """Génère les horaires-types valides depuis les heures d'ouverture.
     Pour 5 et 6 jours de travail, avec les différentes combinaisons de jours de
     repos ET toutes les heures de début par pas de 30 min. Chaque journée intègre
-    la pause si le travail dépasse 6h. Même bloc chaque jour -> 11h de repos OK."""
-    d, f = _min(payload.get('ouverture_debut')), _min(payload.get('ouverture_fin'))
+    la pause si le travail dépasse 6h. Même bloc chaque jour -> 11h de repos OK.
+
+    debut/fin/jour_debut/jour_fin : ouverture explicite (par régime) ; à défaut on
+    prend celle du payload (ouverture globale)."""
+    ouv_debut = debut if debut is not None else payload.get('ouverture_debut')
+    ouv_fin = fin if fin is not None else payload.get('ouverture_fin')
+    jd = jour_debut if jour_debut is not None else payload.get('ouverture_jour_debut', 0)
+    jf = jour_fin if jour_fin is not None else payload.get('ouverture_jour_fin', 6)
+    d, f = _min(ouv_debut), _min(ouv_fin)
     if d is None or f is None:
         return []
-    ouverts = _jours_ouverts(payload.get('ouverture_jour_debut', 0), payload.get('ouverture_jour_fin', 6))
+    ouverts = _jours_ouverts(jd, jf)
     if len(ouverts) < 5:
         return []
     win_s = d
@@ -505,12 +527,24 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
         raise ValueError("Modèle de règlement introuvable (pas encore hébergé).")
     lang = 'NL' if str(payload.get('reglement_langue') or 'FR').upper() == 'NL' else 'FR'
     doc = Document(io.BytesIO(template_bytes))
-    # Commission paritaire : la MÊME balise sert pour la ligne ouvrier ET la ligne
-    # employé -> remplacement positionnel (1ʳᵉ occ. = ouvrier, 2ᵉ occ. = employé).
-    cp_ouv = re.sub(r'\D', '', str(payload.get('commission_paritaire') or '')) or BLANK
-    cp_emp = re.sub(r'\D', '', str(payload.get('cp_employe') or '')) or BLANK
-    den_ouv = (payload.get('cp_ouvrier_denomination') or '').strip() or BLANK
-    den_emp = (payload.get('cp_employe_denomination') or '').strip() or BLANK
+    # Commission paritaire : la MÊME balise sert pour les 2 lignes du modèle
+    # (ouvrier + employé) -> remplacement positionnel (1ʳᵉ occ. = 1er régime/CP,
+    # 2ᵉ occ. = 2e régime/CP). Si des régimes explicites sont fournis, on les utilise.
+    regs = payload.get('regimes') if isinstance(payload.get('regimes'), list) else []
+    if regs:
+        def _cpn(i):
+            return re.sub(r'\D', '', str(regs[i].get('cp') or '')) if i < len(regs) else ''
+        def _den(i):
+            return (regs[i].get('label') or regs[i].get('denomination') or '').strip() if i < len(regs) else ''
+        cp_ouv = _cpn(0) or BLANK
+        cp_emp = _cpn(1) or BLANK
+        den_ouv = _den(0) or BLANK
+        den_emp = _den(1) or BLANK
+    else:
+        cp_ouv = re.sub(r'\D', '', str(payload.get('commission_paritaire') or '')) or BLANK
+        cp_emp = re.sub(r'\D', '', str(payload.get('cp_employe') or '')) or BLANK
+        den_ouv = (payload.get('cp_ouvrier_denomination') or '').strip() or BLANK
+        den_emp = (payload.get('cp_employe_denomination') or '').strip() or BLANK
     sequentiels = {
         'Commission_paritaire_Em': [cp_ouv, cp_emp],
         'Commission_paritaire_Em_v1': [den_ouv, den_emp],
@@ -542,29 +576,60 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
     return out.getvalue()
 
 
-def generer_doc_horaires(payload, identity=None):
-    """Document Word SÉPARÉ contenant tous les horaires-types (5j + 6j, toutes les
-    combinaisons de jours de repos, tous les débuts par 30 min). Si une 2e CP
-    (employés) avec un temps plein différent est fournie, on ajoute une section
-    distincte pour les employés. Renvoie les bytes, ou None si pas d'horaires."""
-    lang = 'NL' if str(payload.get('reglement_langue') or 'FR').upper() == 'NL' else 'FR'
+def _regimes_du_payload(payload):
+    """Normalise les régimes de travail à générer. Chaque régime = une CP avec SON
+    temps plein et SES propres heures d'ouverture -> une section d'horaires dédiée.
+
+    - Si payload['regimes'] est fourni (liste), on l'utilise tel quel.
+    - Sinon rétro-compat : ouvriers (CP principale + ouverture globale) et,
+      si une 2e CP/temps plein employés existe, une section employés (même ouverture).
+    """
+    def _mxj(v):
+        return (_min(f"{v}:00") if str(v or '').isdigit() else 480) or 480
+
+    regs = payload.get('regimes')
+    items = []
+    if isinstance(regs, list) and regs:
+        for rg in regs:
+            deb, fin = rg.get('ouverture_debut'), rg.get('ouverture_fin')
+            if not (deb and fin):
+                continue
+            items.append({
+                'label': (rg.get('label') or '').strip(),
+                'cp': str(rg.get('cp') or '').strip(),
+                'cible': _hebdo_min(rg.get('hebdo') if rg.get('hebdo') not in (None, '') else rg.get('heures_semaine')),
+                'debut': deb, 'fin': fin,
+                'jd': rg.get('jour_debut', rg.get('ouverture_jour_debut', 0)),
+                'jf': rg.get('jour_fin', rg.get('ouverture_jour_fin', 6)),
+                'mx': _mxj(rg.get('max_journalier')),
+            })
+        return items
+
+    # Rétro-compat (ancien modèle ouvrier/employé, ouverture globale unique)
     if not (payload.get('ouverture_debut') and payload.get('ouverture_fin')):
-        return None
-    mx = _min(f"{payload.get('max_journalier')}:00") if str(payload.get('max_journalier') or '').isdigit() else 480
-    mx = mx or 480
-
-    def heures_min(v, defaut=2280):
-        try:
-            return int(round(float(str(v).replace(',', '.')) * 60))
-        except (ValueError, TypeError):
-            return defaut
-
-    # Catégorie ouvriers (CP principale) + éventuellement employés (2e CP)
-    cats = [('ouvriers', payload.get('commission_paritaire'), heures_min(payload.get('heures_ouvrier'), 2280))]
+        return []
+    base = {'debut': payload.get('ouverture_debut'), 'fin': payload.get('ouverture_fin'),
+            'jd': payload.get('ouverture_jour_debut', 0), 'jf': payload.get('ouverture_jour_fin', 6),
+            'mx': _mxj(payload.get('max_journalier'))}
+    items.append({**base, 'label': 'ouvriers', 'cp': payload.get('commission_paritaire'),
+                  'cible': _hebdo_min(payload.get('heures_ouvrier'), 2280)})
     cp_e = str(payload.get('cp_employe') or '').strip()
     h_e = payload.get('heures_employe')
     if cp_e or h_e:
-        cats.append(('employés', cp_e or payload.get('commission_paritaire'), heures_min(h_e, 2280)))
+        items.append({**base, 'label': 'employés', 'cp': cp_e or payload.get('commission_paritaire'),
+                      'cible': _hebdo_min(h_e, 2280)})
+    return items
+
+
+def generer_doc_horaires(payload, identity=None):
+    """Document Word SÉPARÉ contenant tous les horaires-types (5j + 6j, toutes les
+    combinaisons de jours de repos, tous les débuts par 30 min), UNE SECTION PAR
+    RÉGIME (chaque CP avec son temps plein et sa propre ouverture).
+    Renvoie les bytes, ou None si aucun horaire."""
+    lang = 'NL' if str(payload.get('reglement_langue') or 'FR').upper() == 'NL' else 'FR'
+    items = _regimes_du_payload(payload)
+    if not items:
+        return None
 
     from docx.shared import Pt, RGBColor
     doc = Document()
@@ -575,16 +640,20 @@ def generer_doc_horaires(payload, identity=None):
     rt.bold = True; rt.font.size = Pt(16); rt.font.color.rgb = RGBColor(0x1c, 0x22, 0x44)
 
     total_tables = 0
-    for cat, cp, cible in cats:
+    for it in items:
         try:
-            scheds = generer_horaires(payload, langue=lang, cible=cible, max_daily=mx, max_tables=1500)
+            scheds = generer_horaires(payload, langue=lang, cible=it['cible'], max_daily=it['mx'],
+                                      max_tables=1500, debut=it['debut'], fin=it['fin'],
+                                      jour_debut=it['jd'], jour_fin=it['jf'])
         except Exception as e:
-            print(f"[REGLEMENT] horaires {cat} échoués : {e}"); continue
+            print(f"[REGLEMENT] horaires {it.get('label') or it.get('cp')} échoués : {e}"); continue
         if not scheds:
             continue
-        cph = f" (CP {re.sub(r'[^0-9.]', '', str(cp))})" if cp else ''
-        titre = (f"{cat.upper()}{cph} — {_duree(cible)}/semaine" if lang != 'NL'
-                 else f"{cat.upper()}{cph} — {_duree(cible)}/week")
+        cpnum = re.sub(r'[^0-9.]', '', str(it['cp'])) if it['cp'] else ''
+        cph = f" (CP {cpnum})" if cpnum else ''
+        base = (it['label'] or (f"CP {cpnum}" if cpnum else 'Horaires')).upper()
+        titre = (f"{base}{cph} — {_duree(it['cible'])}/semaine" if lang != 'NL'
+                 else f"{base}{cph} — {_duree(it['cible'])}/week")
         _ajouter_annexe_horaires(doc, scheds, lang, titre_section=titre)
         total_tables += len(scheds)
     if total_tables == 0:
