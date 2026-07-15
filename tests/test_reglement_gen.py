@@ -327,6 +327,22 @@ class TestBuildReglement:
         txt = _texte(R.build_reglement(payload, {'nom_societe': 'X'}, _tpl(TPL_NL)))
         assert '124' in txt and '200' in txt
 
+    def test_nl_placeholders_litteraux_remplis(self):
+        # le modèle NL a des littéraux « Nom (Em) », « No ONSS (Em) », annexe 5 non
+        # tokenisés -> doivent être remplis, sans laisser de « (Em) » brut ni casser
+        # le champ Forme juridique voisin.
+        identity = {'nom_societe': 'M&D BÂTI CLEAN', 'forme_juridique': 'SRL',
+                    'adresse_siege_social_1': 'Paddegatstraat 85A', 'adresse_siege_social_2': '1880 Kapelle-op-den-Bos',
+                    'sieges_exploitation': 'Paddegatstraat 85A, 1880 Kapelle-op-den-Bos'}
+        payload = {'reglement_langue': 'NL', 'num_onss': '1234567-89', 'commission_paritaire': '121'}
+        txt = _texte(R.build_reglement(payload, identity, _tpl(TPL_NL)))
+        assert not re.search(r'[A-Za-zÀ-ÿ ]{2,}\((?:Em|Emp|Inst)[^)]*\)', txt)   # aucun nom de champ brut
+        assert 'M&D BÂTI CLEAN' in txt          # Benaming rempli
+        assert 'SRL' in txt                      # champ Forme juridique voisin préservé
+        assert '1234567-89' in txt               # ONSS rempli
+        i = txt.find('adres van de verschillende')
+        assert 'Paddegatstraat 85A, 1880 Kapelle-op-den-Bos' in txt[i:i + 120]  # annexe 5
+
     # ----- cas limites -----
     def test_payload_vide_ne_plante_pas(self):
         out = R.build_reglement({}, None, _tpl(TPL_FR))

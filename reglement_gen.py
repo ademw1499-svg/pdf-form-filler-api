@@ -565,6 +565,39 @@ def _remplir_cameras(doc, nb, lieux, lang='FR'):
     return False
 
 
+def _remplir_placeholders_nl(doc, valeurs):
+    """Le modèle NL contient, à quelques endroits, du TEXTE LITTÉRAL « Nom (Em) »,
+    « No ONSS (Em) » et — à l'annexe 5 — « Rue (Em), No de la maison (Em) Code postal
+    (Em) Localité (Em) » qui n'ont jamais été convertis en jetons au prétraitement
+    (contrairement au modèle FR). Sans ça, ces noms de champs s'affichent bruts dans
+    le document. On les remplit ici. No-op sur le modèle FR (aucun de ces littéraux)."""
+    nom = valeurs.get('Nom_Em', BLANK)
+    onss = valeurs.get('No_ONSS_Em', BLANK)
+    expl = valeurs.get('sieges_exploitation', BLANK)
+    simples = {'Nom (Em)': nom, 'No ONSS (Em)': onss}
+    for p in doc.paragraphs:
+        full = ''.join(r.text or '' for r in p.runs)
+        # Annexe 5 : le paragraphe ne contient QUE le placeholder d'adresse d'exploitation
+        if 'Rue (Em)' in full and 'No de la maison (Em)' in full:
+            done = False
+            for r in p.runs:
+                if not done and 'Rue (Em)' in (r.text or ''):
+                    r.text, done = str(expl), True
+                else:
+                    r.text = ''
+            continue
+        # Remplacements simples (le littéral vit dans un seul run, on préserve le reste)
+        for r in p.runs:
+            t = r.text or ''
+            if not t:
+                continue
+            for lit, val in simples.items():
+                if lit in t:
+                    t = t.replace(lit, str(val))
+            if t != r.text:
+                r.text = t
+
+
 def build_reglement(payload, identity=None, template_bytes=None, model_bytes=None,
                     repertoire=None, cp_repertoire=None):
     """Remplit le modèle officiel et renvoie les bytes du .docx.
@@ -613,6 +646,9 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
     lieux_cam = (payload.get('cameras_emplacement') or '').strip() or (
         ('Néant' if lang != 'NL' else 'Geen') if nb_cam in ('0', '') else BLANK)
     _remplir_cameras(doc, nb_cam, lieux_cam, lang)
+    # Modèle NL : remplit les placeholders littéraux résiduels (Nom, No ONSS, annexe 5)
+    if lang == 'NL':
+        _remplir_placeholders_nl(doc, _valeurs(payload, identity, repertoire))
     # NB : les horaires générés vont dans un DOCUMENT SÉPARÉ (generer_doc_horaires),
     # plus le règlement lui-même, car ils peuvent faire des centaines de pages.
 
