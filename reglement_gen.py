@@ -224,8 +224,10 @@ def _valeurs(payload, identity, repertoire=None):
         'personne_confiance': ou(payload.get('personne_de_confiance')
                                  or (_pdc_du_seppt(payload.get('seppt')) or {}).get('pc')),
         'harcelement': ou((_pdc_du_seppt(payload.get('seppt')) or {}).get('harc')),
-        # sièges d'exploitation : siège social par défaut (1 seul pour la plupart des clients)
-        'sieges_exploitation': ou(' — '.join(x for x in [adr1, (idd.get('adresse_siege_social_2') or '').strip()] if x)),
+        # sièges d'exploitation (annexe 5) : vraies unités d'établissement BCE si
+        # disponibles (identity['sieges_exploitation']), sinon repli sur le siège social
+        'sieges_exploitation': ou(idd.get('sieges_exploitation')
+                                  or ' — '.join(x for x in [adr1, (idd.get('adresse_siege_social_2') or '').strip()] if x)),
         # --- Cadre horaire (Article 10 §2) depuis les heures d'ouverture ---
         'cadre_debut': ou(payload.get('ouverture_debut')),
         'cadre_fin': ou(payload.get('ouverture_fin')),
@@ -460,6 +462,39 @@ def _ajouter_annexe_horaires(doc, schedules, langue='FR', titre_section=None):
         rt.font.size = Pt(9); rt.italic = True
 
 
+def _remplir_cameras(doc, nb, lieux, lang='FR'):
+    """Annexe 7 (Caméras) : « comporte … caméra(s) … aux endroits suivants : … ».
+    Ces blancs sont des runs de « ……… » (pas des jetons). On remplit le 1er blanc
+    (nombre) et le 2e (emplacements) du paragraphe caméras, sans toucher au reste
+    (préserve la mise en page). Défaut : 0 caméra / « Néant »."""
+    kw = 'caméra' if lang != 'NL' else 'camera'
+    mk = 'comporte' if lang != 'NL' else 'bestaat uit'
+
+    def isblank(s):
+        t = (s or '').strip()
+        return bool(t) and set(t) <= set('….') and len(t) >= 2
+
+    for p in doc.paragraphs:
+        runs = p.runs
+        full = ''.join(r.text or '' for r in runs).lower()
+        if kw not in full or mk not in full:
+            continue
+        blanks = [i for i, r in enumerate(runs) if isblank(r.text)]
+        if not blanks:
+            return False
+        i0 = blanks[0]
+        runs[i0].text = re.sub(r'[….]+', str(nb), runs[i0].text, count=1)
+        if i0 + 1 < len(runs):                       # nettoie les points résiduels (ex. NL « ..camera »)
+            runs[i0 + 1].text = re.sub(r'^\s*[….]+', '', runs[i0 + 1].text or '')
+        if len(blanks) >= 2:
+            i1 = blanks[1]
+            runs[i1].text = re.sub(r'[….]+', str(lieux), runs[i1].text, count=1)
+            if i1 + 1 < len(runs):
+                runs[i1 + 1].text = re.sub(r'^\s*[….]+', '', runs[i1 + 1].text or '')
+        return True
+    return False
+
+
 def build_reglement(payload, identity=None, template_bytes=None, model_bytes=None, repertoire=None):
     """Remplit le modèle officiel et renvoie les bytes du .docx.
     template_bytes : le modèle FR/NL (jetons {{...}}) depuis Supabase Storage.
@@ -481,6 +516,11 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
         'Commission_paritaire_Em_v1': [den_ouv, den_emp],
     }
     _remplir_jetons(doc, _valeurs(payload, identity, repertoire), sequentiels)
+    # Annexe 7 — caméras de surveillance (défaut 0 si le client n'en a pas)
+    nb_cam = str(payload.get('nombre_cameras') or '').strip() or '0'
+    lieux_cam = (payload.get('cameras_emplacement') or '').strip() or (
+        ('Néant' if lang != 'NL' else 'Geen') if nb_cam in ('0', '') else BLANK)
+    _remplir_cameras(doc, nb_cam, lieux_cam, lang)
     # NB : les horaires générés vont dans un DOCUMENT SÉPARÉ (generer_doc_horaires),
     # plus le règlement lui-même, car ils peuvent faire des centaines de pages.
 

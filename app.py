@@ -857,6 +857,34 @@ def _bce_data(numero):
     return out
 
 
+def _bce_etablissements(numero):
+    """Adresses des unités d'établissement (= vrais sièges d'exploitation) depuis
+    la BCE Public Search. Ce n'est PAS le siège social : c'est là où l'activité
+    s'exerce réellement (annexe 5 du règlement). Retourne une liste d'adresses
+    « rue n°, CP localité » (souvent une seule pour les petits clients)."""
+    n = re.sub(r'\D', '', numero or '')
+    if len(n) == 10 and n[0] == '0':
+        n = n[1:]                                    # kbopub attend le n° sans le 0 initial
+    if not n:
+        return []
+    try:
+        r = requests.get(
+            "https://kbopub.economie.fgov.be/kbopub/toonvestigingps.html",
+            params={"ondernemingsnummer": n, "lang": "fr"},
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=12)
+        html = r.text if r.status_code < 300 else ''
+    except Exception:
+        return []
+    flat = re.sub(r'\s+', ' ', _unescape(re.sub(r'<[^>]+>', ' ', html)))
+    etabs = []
+    for m in re.finditer(r"Adresse de l'unit.{0,3} d.{0,3}.tablissement:*\s*(.+?)\s+(?:Depuis|Num.ro|Pas de|Statut)", flat):
+        adr = re.sub(r'\s+', ' ', m.group(1)).strip(' :')
+        adr = re.sub(r'\s+(\d{4}\s+[A-Za-zÀ-ÿ])', r', \1', adr)   # virgule avant le code postal
+        if adr and adr not in etabs:
+            etabs.append(adr)
+    return etabs
+
+
 @app.route('/bce/<numero>', methods=['GET'])
 def bce_lookup(numero):
     """Pré-remplissage affiliation (données publiques BCE/VIES/ONSS)."""
@@ -1086,6 +1114,13 @@ def reglement_generer():
         d = _bce_data(num)
         if not d.get('error'):
             identity = d
+            # Vrai siège d'exploitation (annexe 5) : unités d'établissement BCE
+            try:
+                etabs = _bce_etablissements(num)
+                if etabs:
+                    identity['sieges_exploitation'] = ' ; '.join(etabs)
+            except Exception:
+                pass
     template_bytes = _fetch_reglement_template(payload.get('reglement_langue'))
     if not template_bytes:
         return jsonify({"error": "Le modèle de règlement n'est pas encore hébergé (upload Supabase à faire)."}), 503
