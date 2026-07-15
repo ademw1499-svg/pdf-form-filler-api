@@ -427,12 +427,15 @@ def generer_horaires(payload, langue='FR', cible=2280, max_daily=480, min_block=
 
     for work, off, mode in arrangements():
         n = len(work)
-        daily_t = min(cible // n, max_daily)   # jamais plus que le max journalier légal
-        span_t = daily_t + (pause if daily_t >= SEUIL_PAUSE else 0)
-        if span_t <= win_len:
-            daily = daily_t                                   # temps plein pile (borné au max/jour)
+        plein = cible // n                                    # min/jour requis pour le temps plein
+        span_plein = plein + (pause if plein >= SEUIL_PAUSE else 0)
+        # « complet » = l'horaire atteint réellement le temps plein (rentre dans la
+        # fenêtre d'ouverture ET respecte le max journalier légal).
+        complet = (plein <= max_daily) and (span_plein <= win_len)
+        if complet:
+            daily = plein
         elif (win_len - pause) >= min_block:
-            daily = min(win_len - pause, max_daily)            # remplit la fenêtre
+            daily = min(win_len - pause, max_daily)            # remplit la fenêtre (SOUS le temps plein)
         else:
             continue
         span = daily + (pause if daily >= SEUIL_PAUSE else 0)
@@ -450,7 +453,8 @@ def generer_horaires(payload, langue='FR', cible=2280, max_daily=480, min_block=
             titre = (f"{mode} — {'repos' if langue != 'NL' else 'rust'} {repos}"
                      f" · {'début' if langue != 'NL' else 'start'} {_hhmm(st)}{approx}")
             schedules.append({'titre': titre, 'lignes': lignes, 'off': off,
-                              'total': total, 'pause': pause if daily >= SEUIL_PAUSE else 0})
+                              'total': total, 'complet': complet,
+                              'pause': pause if daily >= SEUIL_PAUSE else 0})
 
         st, last = win_s, None
         while st + span <= win_e:
@@ -730,6 +734,33 @@ def _regimes_du_payload(payload, cp_repertoire=None):
     return items
 
 
+def _ajouter_avertissement_ouverture(doc, it, cible, max_total, langue, titre):
+    """Écrit, à la place des tableaux, un avertissement clair quand les heures
+    d'ouverture saisies ne permettent pas d'atteindre le temps plein (ex. 38h dans
+    une fenêtre de 7h sur 5 jours). Évite de sortir des horaires « 38h » à 32h30."""
+    from docx.shared import Pt, RGBColor
+    AMBRE = RGBColor(0xb4, 0x53, 0x09)
+    noms = JOURS_NL if langue == 'NL' else JOURS_FR
+    ouv = _jours_ouverts(it['jd'], it['jf'])
+    jours_txt = f"{noms[ouv[0]]}–{noms[ouv[-1]]}"
+    deb, fin = it['debut'], it['fin']
+    doc.add_page_break()
+    h = doc.add_paragraph()
+    rh = h.add_run(titre); rh.bold = True; rh.font.size = Pt(14); rh.font.color.rgb = AMBRE
+    p = doc.add_paragraph()
+    if langue != 'NL':
+        msg = (f"⚠ Les heures d'ouverture saisies ({deb}–{fin}, {jours_txt} = {len(ouv)} jours "
+               f"d'ouverture) ne permettent pas d'atteindre le temps plein de {_duree(cible)}/semaine. "
+               f"Maximum atteignable dans cette fenêtre : environ {_duree(max_total)}/semaine. "
+               f"→ Élargissez la plage horaire ou ajoutez des jours d'ouverture, puis régénérez.")
+    else:
+        msg = (f"⚠ De ingevoerde openingsuren ({deb}–{fin}, {jours_txt} = {len(ouv)} openingsdagen) "
+               f"laten niet toe om het voltijds uurrooster van {_duree(cible)}/week te bereiken. "
+               f"Maximaal haalbaar in dit venster: ongeveer {_duree(max_total)}/week. "
+               f"→ Verruim de openingsuren of voeg openingsdagen toe en genereer opnieuw.")
+    rp = p.add_run(msg); rp.font.size = Pt(11); rp.font.color.rgb = AMBRE
+
+
 def generer_doc_horaires(payload, identity=None, cp_repertoire=None):
     """Document Word SÉPARÉ contenant tous les horaires-types (5j + 6j, toutes les
     combinaisons de jours de repos, tous les débuts par 30 min), UNE SECTION PAR
@@ -763,8 +794,17 @@ def generer_doc_horaires(payload, identity=None, cp_repertoire=None):
         base = (it['label'] or (f"CP {cpnum}" if cpnum else 'Horaires')).upper()
         titre = (f"{base}{cph} — {_duree(it['cible'])}/semaine" if lang != 'NL'
                  else f"{base}{cph} — {_duree(it['cible'])}/week")
-        _ajouter_annexe_horaires(doc, scheds, lang, titre_section=titre)
-        total_tables += len(scheds)
+        # On ne garde QUE les horaires qui atteignent réellement le temps plein.
+        complets = [s for s in scheds if s.get('complet')]
+        if complets:
+            _ajouter_annexe_horaires(doc, complets, lang, titre_section=titre)
+            total_tables += len(complets)
+        else:
+            # Aucun horaire n'atteint le temps plein -> l'ouverture est trop étroite :
+            # on l'écrit clairement au lieu de tableaux trompeurs sous le mauvais total.
+            max_total = max((s['total'] for s in scheds), default=0)
+            _ajouter_avertissement_ouverture(doc, it, it['cible'], max_total, lang, titre)
+            total_tables += 1
     if total_tables == 0:
         return None
     out = io.BytesIO(); doc.save(out)

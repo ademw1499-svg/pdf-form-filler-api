@@ -261,12 +261,28 @@ class TestDocHoraires:
         assert R.generer_doc_horaires({'reglement_langue': 'FR'}) is None
 
     def test_cp_sans_donnees_defaut_38(self):
-        # CP inconnue, temps plein non fourni -> 38h par défaut, doc quand même généré
+        # CP inconnue, temps plein non fourni -> 38h par défaut ; fenêtre large -> horaires complets
         payload = {'reglement_langue': 'FR', 'regimes': [
-            {'cp': '999', 'ouverture_debut': '09:00', 'ouverture_fin': '17:00', 'jour_debut': 0, 'jour_fin': 4},
+            {'cp': '999', 'ouverture_debut': '06:00', 'ouverture_fin': '20:00', 'jour_debut': 0, 'jour_fin': 4},
         ]}
         txt = _texte(R.generer_doc_horaires(payload, {'nom_societe': 'X'}, cp_repertoire=CP_REP))
         assert '38h/semaine' in txt
+        assert 'Total : 38h' in txt                # des horaires atteignent réellement 38h
+        assert 'ne permettent pas' not in txt      # pas d'avertissement
+
+    def test_ouverture_insuffisante_avertit(self):
+        # 38h impossible dans 12:00-19:00 (7h) sur 5 jours -> AVERTISSEMENT, jamais de
+        # tableau trompeur qui totalise 32h30 sous un titre « 38h/semaine ».
+        payload = {'reglement_langue': 'FR', 'regimes': [
+            {'cp': '201', 'label': 'Commerce', 'hebdo': '38',
+             'ouverture_debut': '12:00', 'ouverture_fin': '19:00', 'jour_debut': 0, 'jour_fin': 4},
+        ]}
+        out = R.generer_doc_horaires(payload, {'nom_societe': 'X'})
+        assert out is not None
+        txt = _texte(out)
+        assert 'ne permettent pas' in txt and 'Maximum atteignable' in txt
+        assert 'Total : 32h30' not in txt          # aucun tableau sous temps plein
+        assert '32h30/semaine' in txt              # mais le max atteignable est indiqué
 
 
 # ------------------------------------------------------- intégration modèle Word
