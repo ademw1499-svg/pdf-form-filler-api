@@ -14,6 +14,7 @@ import io
 import re
 import zipfile
 import os
+from html import unescape
 import pytest
 
 import reglement_gen as R
@@ -32,10 +33,12 @@ def _tpl(path):
 
 
 def _texte(docx_bytes):
-    """Texte lisible d'un .docx (jetons remplacés, sans codes de champ)."""
+    """Texte lisible d'un .docx (jetons remplacés, sans codes de champ). Les
+    entités XML (&lt; &gt; &amp;) sont décodées comme Word les affiche."""
     x = zipfile.ZipFile(io.BytesIO(docx_bytes)).read('word/document.xml').decode('utf-8')
     t = re.sub(r'<[^>]+>', '', x)
-    return re.sub(r'MERGEFIELD [A-Za-zÀ-ÿ0-9_]+ ', '', t)
+    t = re.sub(r'MERGEFIELD [A-Za-zÀ-ÿ0-9_]+ ', '', t)
+    return unescape(t)
 
 
 # Répertoire CP de test (comme en base)
@@ -54,6 +57,14 @@ class TestHebdoMin:
         ('36,5', 2190), ('36.5', 2190), ('40h', 2400), ('35h00', 2100),
     ])
     def test_formats(self, val, attendu):
+        assert R._hebdo_min(val) == attendu
+
+    @pytest.mark.parametrize('val,attendu', [
+        ('37u', 2220), ('40u', 2400), ('36u45', 2205), ('38u30', 2310),  # notation NL (uur)
+        ('37:30', 2250), ('40:00', 2400),                                  # notation horloge
+        ('37 heures', 2220), ('38h/semaine', 2280),                        # avec suffixe
+    ])
+    def test_formats_nl_et_suffixes(self, val, attendu):
         assert R._hebdo_min(val) == attendu
 
     def test_defaut_si_vide(self):
@@ -169,6 +180,19 @@ class TestRegimes:
         assert len(items) == 2
         assert items[0]['cible'] == 2400 and items[1]['cible'] == 2280
 
+    def test_hebdo_nl_depuis_repertoire(self):
+        # temps plein stocké en notation NL « 37u » -> 2220 (pas le défaut 38h)
+        rep = [{'cp': '124', 'denomination': 'Bouw', 'heures_semaine': '40u'}]
+        payload = {'regimes': [{'cp': '124', 'ouverture_debut': '07:00', 'ouverture_fin': '19:00', 'jour_debut': 0, 'jour_fin': 5}]}
+        assert R._regimes_du_payload(payload, rep)[0]['cible'] == 2400
+
+    def test_entree_regime_non_dict_ignoree(self):
+        # entrée malformée (chaîne) dans regimes -> ignorée, pas de plantage
+        payload = {'regimes': ['garbage', None,
+                               {'cp': '112', 'hebdo': '38', 'ouverture_debut': '10:00', 'ouverture_fin': '18:00', 'jour_debut': 0, 'jour_fin': 5}]}
+        items = R._regimes_du_payload(payload)
+        assert len(items) == 1 and items[0]['cp'] == '112'
+
 
 class TestGenererHoraires:
     def test_bornes_par_ouverture(self):
@@ -193,6 +217,14 @@ class TestGenererHoraires:
 
     def test_ouverture_absente_vide(self):
         assert R.generer_horaires({}, debut=None, fin=None) == []
+
+    def test_max_journalier_plafonne(self):
+        # temps plein irréaliste (45h) : aucune journée ne doit dépasser le max (8h=480)
+        sched = R.generer_horaires({}, cible=2700, max_daily=480,
+                                   debut='06:00', fin='23:00', jour_debut=0, jour_fin=6)
+        assert sched
+        durees = [(b - a) + (d - c) for s in sched for (_, a, b, c, d) in s['lignes'] if a is not None]
+        assert max(durees) <= 480
 
 
 class TestDocHoraires:
@@ -308,6 +340,12 @@ class TestBuildReglement:
         with pytest.raises(ValueError):
             R.build_reglement({}, None, None)
 
+    def test_regimes_malformes_ne_plantent_pas(self):
+        # régimes contenant des entrées non-dict -> ne plante pas, garde la CP valide
+        payload = {'reglement_langue': 'FR', 'regimes': ['x', None, {'cp': '112'}]}
+        out = R.build_reglement(payload, {'nom_societe': 'X'}, _tpl(TPL_FR))
+        assert '112' in _texte(out)
+
 
 class TestValeurs:
     def test_vide_donne_blanc(self):
@@ -366,3 +404,24 @@ class TestInstitutions:
     def test_repertoire_vide_ok(self):
         assert R._valeurs_institutions({'assurance_loi': 'AXA'}, {}, []) == {}
         assert R._valeurs_institutions({}, {}, None) == {}
+
+    def test_nom_exact_prioritaire(self):
+        # « AG » ne doit PAS matcher « AGACHE » par sous-chaîne : correspondance exacte d'abord
+        insts = [
+            {'type': 'assurance', 'nom': 'AGACHE ASSURANCES', 'rue': 'Rue Longue', 'numero': '1', 'code_postal': '1000', 'localite': 'Bxl'},
+            {'type': 'assurance', 'nom': 'AG', 'rue': 'Rue Courte', 'numero': '2', 'code_postal': '1000', 'localite': 'Bxl'},
+        ]
+        v = R._valeurs_institutions({'assurance_loi': 'AG'}, {}, insts)
+        assert any('Rue Courte' in str(x) for x in v.values())        # a bien pris AG
+        assert all('Rue Longue' not in str(x) for x in v.values())    # pas AGACHE
+
+
+class TestCamerasRobustesse:
+    def test_texte_regex_special(self):
+        # emplacement avec caractères regex spéciaux : jamais réinterprété, pas de plantage
+        payload = {'reglement_langue': 'FR', 'nombre_cameras': '2',
+                   'cameras_emplacement': r'hall \1 & sortie (n°3) \g<0>'}
+        txt = _texte(R.build_reglement(payload, {'nom_societe': 'X'}, _tpl(TPL_FR)))
+        i = txt.find('caméra(s) installée')
+        bloc = txt[i:i + 120]
+        assert r'\1' in bloc and 'sortie (n°3)' in bloc and r'\g<0>' in bloc

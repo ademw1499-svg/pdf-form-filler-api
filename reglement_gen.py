@@ -135,8 +135,15 @@ def _valeurs_institutions(payload, identity, repertoire):
         nom = (nom or '').lower().strip()
         cands = [i for i in repertoire if (i.get('type') or '') == typ]
         if nom:
+            # 1) correspondance EXACTE prioritaire (évite qu'un nom court comme « AG »
+            #    matche par erreur « AGACHE » via sous-chaîne)
             for i in cands:
-                if (i.get('nom') or '').lower().strip() in nom or nom in (i.get('nom') or '').lower():
+                if (i.get('nom') or '').lower().strip() == nom:
+                    return i
+            # 2) repli : sous-chaîne dans un sens ou l'autre
+            for i in cands:
+                cn = (i.get('nom') or '').lower().strip()
+                if cn and (cn in nom or nom in cn):
                     return i
         return cands[0] if len(cands) == 1 else None
 
@@ -291,17 +298,20 @@ def _duree(m):
 
 
 def _hebdo_min(v, defaut=2280):
-    """Temps plein hebdomadaire -> minutes. Accepte « 36h30 », « 36,5 », « 38 »."""
+    """Temps plein hebdomadaire -> minutes. Accepte les notations FR et NL :
+    « 36h30 », « 38h », « 37u », « 36u45 » (uur, néerlandais), « 37:30 »,
+    « 36,5 », « 38 », « 37 heures »… Tolère les suffixes (heures/semaine/week)."""
     s = str(v or '').strip().lower().replace(',', '.')
     if not s:
         return defaut
-    m = re.match(r'^(\d+)\s*h\s*(\d{1,2})?$', s)      # « 36h30 » / « 38h »
+    # heures + minutes : séparateur « h » (FR), « u » (NL uur) ou « : »
+    m = re.match(r'^(\d+)\s*[hu:]\s*(\d{1,2})?', s)   # « 36h30 » « 38h » « 37u » « 36u45 » « 37:30 »
     if m:
         return int(m.group(1)) * 60 + int(m.group(2) or 0)
-    try:
-        return int(round(float(s) * 60))              # « 36.5 » / « 38 »
-    except ValueError:
-        return defaut
+    m2 = re.match(r'^(\d+(?:\.\d+)?)', s)             # « 36.5 » « 38 » « 37 heures »
+    if m2:
+        return int(round(float(m2.group(1)) * 60))
+    return defaut
 
 
 def _cp_norm(x):
@@ -417,10 +427,10 @@ def generer_horaires(payload, langue='FR', cible=2280, max_daily=480, min_block=
 
     for work, off, mode in arrangements():
         n = len(work)
-        daily_t = cible // n
+        daily_t = min(cible // n, max_daily)   # jamais plus que le max journalier légal
         span_t = daily_t + (pause if daily_t >= SEUIL_PAUSE else 0)
         if span_t <= win_len:
-            daily = daily_t                                   # temps plein pile
+            daily = daily_t                                   # temps plein pile (borné au max/jour)
         elif (win_len - pause) >= min_block:
             daily = min(win_len - pause, max_daily)            # remplit la fenêtre
         else:
@@ -537,15 +547,20 @@ def _remplir_cameras(doc, nb, lieux, lang='FR'):
         blanks = [i for i, r in enumerate(runs) if isblank(r.text)]
         if not blanks:
             return False
+        # remplacement par FONCTION : le texte utilisateur (nb/lieux) n'est jamais
+        # réinterprété comme motif de remplacement (\1, \g<>, &, \ … restent littéraux).
+        # Nettoyage résiduel : on retire les « … » ou 2+ points, mais PAS un point isolé
+        # (qui pourrait terminer une phrase légitime).
+        resid = r'^\s*(?:…+|\.{2,})'
         i0 = blanks[0]
-        runs[i0].text = re.sub(r'[….]+', str(nb), runs[i0].text, count=1)
-        if i0 + 1 < len(runs):                       # nettoie les points résiduels (ex. NL « ..camera »)
-            runs[i0 + 1].text = re.sub(r'^\s*[….]+', '', runs[i0 + 1].text or '')
+        runs[i0].text = re.sub(r'[….]+', lambda _m: str(nb), runs[i0].text, count=1)
+        if i0 + 1 < len(runs):                       # ex. NL « ..camera » -> « camera »
+            runs[i0 + 1].text = re.sub(resid, '', runs[i0 + 1].text or '')
         if len(blanks) >= 2:
             i1 = blanks[1]
-            runs[i1].text = re.sub(r'[….]+', str(lieux), runs[i1].text, count=1)
+            runs[i1].text = re.sub(r'[….]+', lambda _m: str(lieux), runs[i1].text, count=1)
             if i1 + 1 < len(runs):
-                runs[i1 + 1].text = re.sub(r'^\s*[….]+', '', runs[i1 + 1].text or '')
+                runs[i1 + 1].text = re.sub(resid, '', runs[i1 + 1].text or '')
         return True
     return False
 
@@ -567,7 +582,8 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
     # Commission paritaire : la MÊME balise sert pour les 2 lignes du modèle
     # (ouvrier + employé) -> remplacement positionnel (1ʳᵉ occ. = 1er régime/CP,
     # 2ᵉ occ. = 2e régime/CP). Si des régimes explicites sont fournis, on les utilise.
-    regs = payload.get('regimes') if isinstance(payload.get('regimes'), list) else []
+    regs = [r for r in (payload.get('regimes') or []) if isinstance(r, dict)] \
+        if isinstance(payload.get('regimes'), list) else []
     if regs:
         def _cpn(i):
             return re.sub(r'\D', '', str(regs[i].get('cp') or '')) if i < len(regs) else ''
@@ -643,6 +659,8 @@ def _regimes_du_payload(payload, cp_repertoire=None):
     items = []
     if isinstance(regs, list) and regs:
         for rg in regs:
+            if not isinstance(rg, dict):            # entrée malformée -> ignorée
+                continue
             deb, fin = rg.get('ouverture_debut'), rg.get('ouverture_fin')
             if not (deb and fin):
                 continue
