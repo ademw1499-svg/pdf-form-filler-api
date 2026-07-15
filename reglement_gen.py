@@ -304,6 +304,39 @@ def _hebdo_min(v, defaut=2280):
         return defaut
 
 
+def _cp_norm(x):
+    """Clé de CP normalisée : chiffres + éventuel sous-numéro, sans « .00 » final.
+    « 112 »/« 112.00 » -> « 112 » ; « 102.01 » -> « 102.01 »."""
+    s = re.sub(r'[^0-9.]', '', str(x or ''))
+    s = re.sub(r'\.00$', '', s)
+    return s
+
+
+def _cp_lookup(cp_repertoire):
+    """{clé CP normalisée -> {'hebdo', 'denom'}} depuis le répertoire des CP.
+    Indexe aussi la variante chiffres-seuls (ex. « 10201 ») pour tolérer les saisies."""
+    out = {}
+    for row in (cp_repertoire or []):
+        k = _cp_norm(row.get('cp'))
+        if not k:
+            continue
+        rec = {'hebdo': str(row.get('heures_semaine') or '').strip(),
+               'denom': str(row.get('denomination') or '').strip()}
+        out.setdefault(k, rec)
+        dk = re.sub(r'\D', '', k)
+        if dk:
+            out.setdefault(dk, rec)
+    return out
+
+
+def _cp_info(lut, cp):
+    """Retrouve {'hebdo','denom'} d'une CP dans le lookup (tolère « 112 »/« 112.00 »/« 11200 »)."""
+    if not lut:
+        return {}
+    n = _cp_norm(cp)
+    return lut.get(n) or lut.get(re.sub(r'\D', '', n)) or {}
+
+
 def _jours_ouverts(jd, jf):
     """Plage de jours contiguë de jd à jf (index 0=lundi), gère le passage de semaine."""
     try:
@@ -517,15 +550,19 @@ def _remplir_cameras(doc, nb, lieux, lang='FR'):
     return False
 
 
-def build_reglement(payload, identity=None, template_bytes=None, model_bytes=None, repertoire=None):
+def build_reglement(payload, identity=None, template_bytes=None, model_bytes=None,
+                    repertoire=None, cp_repertoire=None):
     """Remplit le modèle officiel et renvoie les bytes du .docx.
     template_bytes : le modèle FR/NL (jetons {{...}}) depuis Supabase Storage.
     model_bytes    : (optionnel) horaire sectoriel à ajouter en fin de document.
     repertoire     : liste d'institutions (adresses) pour remplir Art. 2 & 66.
+    cp_repertoire  : liste des commissions paritaires (n° + dénomination + temps plein)
+                     pour compléter la dénomination de la CP en Article 2.
     """
     if not template_bytes:
         raise ValueError("Modèle de règlement introuvable (pas encore hébergé).")
     lang = 'NL' if str(payload.get('reglement_langue') or 'FR').upper() == 'NL' else 'FR'
+    lut = _cp_lookup(cp_repertoire)
     doc = Document(io.BytesIO(template_bytes))
     # Commission paritaire : la MÊME balise sert pour les 2 lignes du modèle
     # (ouvrier + employé) -> remplacement positionnel (1ʳᵉ occ. = 1er régime/CP,
@@ -535,7 +572,10 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
         def _cpn(i):
             return re.sub(r'\D', '', str(regs[i].get('cp') or '')) if i < len(regs) else ''
         def _den(i):
-            return (regs[i].get('label') or regs[i].get('denomination') or '').strip() if i < len(regs) else ''
+            if i >= len(regs):
+                return ''
+            lbl = (regs[i].get('label') or regs[i].get('denomination') or '').strip()
+            return lbl or _cp_info(lut, regs[i].get('cp')).get('denom', '')
         cp_ouv = _cpn(0) or BLANK
         cp_emp = _cpn(1) or BLANK
         den_ouv = _den(0) or BLANK
@@ -543,8 +583,10 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
     else:
         cp_ouv = re.sub(r'\D', '', str(payload.get('commission_paritaire') or '')) or BLANK
         cp_emp = re.sub(r'\D', '', str(payload.get('cp_employe') or '')) or BLANK
-        den_ouv = (payload.get('cp_ouvrier_denomination') or '').strip() or BLANK
-        den_emp = (payload.get('cp_employe_denomination') or '').strip() or BLANK
+        den_ouv = ((payload.get('cp_ouvrier_denomination') or '').strip()
+                   or _cp_info(lut, payload.get('commission_paritaire')).get('denom', '')) or BLANK
+        den_emp = ((payload.get('cp_employe_denomination') or '').strip()
+                   or _cp_info(lut, payload.get('cp_employe')).get('denom', '')) or BLANK
     sequentiels = {
         'Commission_paritaire_Em': [cp_ouv, cp_emp],
         'Commission_paritaire_Em_v1': [den_ouv, den_emp],
@@ -576,16 +618,26 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
     return out.getvalue()
 
 
-def _regimes_du_payload(payload):
+def _regimes_du_payload(payload, cp_repertoire=None):
     """Normalise les régimes de travail à générer. Chaque régime = une CP avec SON
     temps plein et SES propres heures d'ouverture -> une section d'horaires dédiée.
 
-    - Si payload['regimes'] est fourni (liste), on l'utilise tel quel.
+    - Si payload['regimes'] est fourni (liste), on l'utilise ; le temps plein et le
+      libellé manquants sont complétés depuis le répertoire des CP (sinon 38h/sem).
     - Sinon rétro-compat : ouvriers (CP principale + ouverture globale) et,
       si une 2e CP/temps plein employés existe, une section employés (même ouverture).
     """
+    lut = _cp_lookup(cp_repertoire)
+
     def _mxj(v):
         return (_min(f"{v}:00") if str(v or '').isdigit() else 480) or 480
+
+    def _cible(cp, hebdo):
+        h = hebdo if str(hebdo or '').strip() else _cp_info(lut, cp).get('hebdo')
+        return _hebdo_min(h, 2280)
+
+    def _lib(cp, label):
+        return (label or '').strip() or _cp_info(lut, cp).get('denom', '')
 
     regs = payload.get('regimes')
     items = []
@@ -594,10 +646,12 @@ def _regimes_du_payload(payload):
             deb, fin = rg.get('ouverture_debut'), rg.get('ouverture_fin')
             if not (deb and fin):
                 continue
+            cp = str(rg.get('cp') or '').strip()
+            hebdo = rg.get('hebdo') if rg.get('hebdo') not in (None, '') else rg.get('heures_semaine')
             items.append({
-                'label': (rg.get('label') or '').strip(),
-                'cp': str(rg.get('cp') or '').strip(),
-                'cible': _hebdo_min(rg.get('hebdo') if rg.get('hebdo') not in (None, '') else rg.get('heures_semaine')),
+                'label': _lib(cp, rg.get('label')),
+                'cp': cp,
+                'cible': _cible(cp, hebdo),
                 'debut': deb, 'fin': fin,
                 'jd': rg.get('jour_debut', rg.get('ouverture_jour_debut', 0)),
                 'jf': rg.get('jour_fin', rg.get('ouverture_jour_fin', 6)),
@@ -611,23 +665,24 @@ def _regimes_du_payload(payload):
     base = {'debut': payload.get('ouverture_debut'), 'fin': payload.get('ouverture_fin'),
             'jd': payload.get('ouverture_jour_debut', 0), 'jf': payload.get('ouverture_jour_fin', 6),
             'mx': _mxj(payload.get('max_journalier'))}
-    items.append({**base, 'label': 'ouvriers', 'cp': payload.get('commission_paritaire'),
-                  'cible': _hebdo_min(payload.get('heures_ouvrier'), 2280)})
+    cp_o = payload.get('commission_paritaire')
+    items.append({**base, 'label': _lib(cp_o, 'ouvriers'), 'cp': cp_o,
+                  'cible': _cible(cp_o, payload.get('heures_ouvrier'))})
     cp_e = str(payload.get('cp_employe') or '').strip()
     h_e = payload.get('heures_employe')
     if cp_e or h_e:
-        items.append({**base, 'label': 'employés', 'cp': cp_e or payload.get('commission_paritaire'),
-                      'cible': _hebdo_min(h_e, 2280)})
+        items.append({**base, 'label': _lib(cp_e or cp_o, 'employés'), 'cp': cp_e or cp_o,
+                      'cible': _cible(cp_e or cp_o, h_e)})
     return items
 
 
-def generer_doc_horaires(payload, identity=None):
+def generer_doc_horaires(payload, identity=None, cp_repertoire=None):
     """Document Word SÉPARÉ contenant tous les horaires-types (5j + 6j, toutes les
     combinaisons de jours de repos, tous les débuts par 30 min), UNE SECTION PAR
     RÉGIME (chaque CP avec son temps plein et sa propre ouverture).
     Renvoie les bytes, ou None si aucun horaire."""
     lang = 'NL' if str(payload.get('reglement_langue') or 'FR').upper() == 'NL' else 'FR'
-    items = _regimes_du_payload(payload)
+    items = _regimes_du_payload(payload, cp_repertoire)
     if not items:
         return None
 

@@ -1207,13 +1207,20 @@ def reglement_generer():
     mid = (payload.get('horaire_modele') or '').strip()
     if mid:
         model_bytes = _fetch_horaire_model(mid)
+    cp_rep = _commissions_repertoire()
     try:
         from reglement_gen import build_reglement, generer_doc_horaires
         regl = build_reglement(payload, identity, template_bytes, model_bytes,
-                               repertoire=_institutions_repertoire())
-        horaires = generer_doc_horaires(payload, identity)
+                               repertoire=_institutions_repertoire(), cp_repertoire=cp_rep)
     except Exception as e:
         return jsonify({"error": f"Échec de la génération : {e}"}), 500
+    # Les horaires générés ne doivent JAMAIS bloquer le règlement : en cas d'échec
+    # (données d'ouverture farfelues, etc.), on renvoie quand même le règlement seul.
+    horaires = None
+    try:
+        horaires = generer_doc_horaires(payload, identity, cp_repertoire=cp_rep)
+    except Exception as e:
+        print(f"[REGLEMENT] horaires ignorés (non bloquant) : {e}")
     base = re.sub(r'\D', '', str(num or '')) or 'employeur'
     DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     if horaires:
