@@ -218,6 +218,36 @@ class TestGenererHoraires:
     def test_ouverture_absente_vide(self):
         assert R.generer_horaires({}, debut=None, fin=None) == []
 
+    def test_balayage_invariants_tous_cas(self):
+        """Balayage large : pour TOUTE combinaison (temps plein × fenêtre jour/nuit ×
+        5/6/7 jours), chaque horaire généré doit être légal ET, s'il est « complet »,
+        totaliser EXACTEMENT le temps plein (garde-fou anti « 38h qui fait 32h30 »)."""
+        import itertools
+        cibles = [2100, 2190, 2220, 2280, 2340, 2400]        # 35h..40h
+        starts = [0, 6 * 60, 10 * 60, 20 * 60]               # incl. nuit
+        durs = range(4 * 60, 24 * 60 + 1, 90)                # fenêtre 4h..24h
+        maxd = 480
+        n = 0
+        for cible, start, dur, jf in itertools.product(cibles, starts, durs, [4, 5, 6]):
+            deb = f"{(start // 60) % 24:02d}:{start % 60:02d}"
+            fm = start + dur
+            fin = f"{(fm // 60) % 24:02d}:{fm % 60:02d}"
+            scheds = R.generer_horaires({}, cible=cible, max_daily=maxd, max_tables=60,
+                                        debut=deb, fin=fin, jour_debut=0, jour_fin=jf)
+            for s in scheds:
+                n += 1
+                work = [(a, b, c, d) for (_, a, b, c, d) in s['lignes'] if a is not None]
+                assert len(s['lignes']) == 7
+                real = sum((b - a) + (d - c) for (a, b, c, d) in work)
+                assert real == s['total']                     # cohérence interne
+                if s.get('complet'):
+                    assert s['total'] == cible, f"complet mais {s['total']}!={cible}"
+                for (a, b, c, d) in work:
+                    assert (b - a) + (d - c) <= maxd          # max journalier
+                    if (b - a) + (d - c) > 360:
+                        assert c > b                          # pause dès >6h
+        assert n > 30000                                      # le balayage a bien tourné
+
     def test_max_journalier_plafonne(self):
         # temps plein irréaliste (45h) : aucune journée ne doit dépasser le max (8h=480)
         sched = R.generer_horaires({}, cible=2700, max_daily=480,
