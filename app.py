@@ -232,11 +232,15 @@ def list_employeurs():
         return jsonify({"error": "Non authentifié"}), 401
     q = (request.args.get('q') or '').strip().lower()
     try:
-        r = requests.get(
-            f"{SUPABASE_URL}/rest/v1/employeurs"
-            "?select=num_entreprise,nom_societe,email,statut,numero_employeur,manquants,message,updated_at"
-            "&order=updated_at.desc&limit=500",
-            headers=_supabase_headers(), timeout=10)
+        base = f"{SUPABASE_URL}/rest/v1/employeurs?order=updated_at.desc&limit=500"
+        # colonnes §10 (statut/manquants/…) : si elles n'existent pas encore en base,
+        # PostgREST renvoie 400 -> on retombe sur les colonnes de base (ne casse rien).
+        r = requests.get(base + "&select=num_entreprise,nom_societe,email,statut,"
+                         "numero_employeur,manquants,message,updated_at",
+                         headers=_supabase_headers(), timeout=10)
+        if r.status_code >= 300:
+            r = requests.get(base + "&select=num_entreprise,nom_societe,email,updated_at",
+                             headers=_supabase_headers(), timeout=10)
         rows = r.json() if r.status_code < 300 else []
         if q:
             rows = [x for x in rows
