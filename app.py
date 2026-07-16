@@ -1214,13 +1214,15 @@ def reglement_generer():
                                repertoire=_institutions_repertoire(), cp_repertoire=cp_rep)
     except Exception as e:
         return jsonify({"error": f"Échec de la génération : {e}"}), 500
-    # Les horaires générés ne doivent JAMAIS bloquer le règlement : en cas d'échec
-    # (données d'ouverture farfelues, etc.), on renvoie quand même le règlement seul.
+    # Tableaux d'horaires en annexe : FACULTATIFS depuis la loi du 1er juin 2026
+    # (le cadre horaire de l'Article 10 §2 suffit). On ne les génère que si demandé.
+    # Les horaires ne doivent JAMAIS bloquer le règlement (générés dans un try séparé).
     horaires = None
-    try:
-        horaires = generer_doc_horaires(payload, identity, cp_repertoire=cp_rep)
-    except Exception as e:
-        print(f"[REGLEMENT] horaires ignorés (non bloquant) : {e}")
+    if payload.get('joindre_horaires'):
+        try:
+            horaires = generer_doc_horaires(payload, identity, cp_repertoire=cp_rep)
+        except Exception as e:
+            print(f"[REGLEMENT] horaires ignorés (non bloquant) : {e}")
     base = re.sub(r'\D', '', str(num or '')) or 'employeur'
     DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     if horaires:
