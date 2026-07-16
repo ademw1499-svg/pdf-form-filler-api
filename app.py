@@ -234,7 +234,8 @@ def list_employeurs():
     try:
         r = requests.get(
             f"{SUPABASE_URL}/rest/v1/employeurs"
-            "?select=num_entreprise,nom_societe,email,updated_at&order=updated_at.desc&limit=500",
+            "?select=num_entreprise,nom_societe,email,statut,numero_employeur,manquants,message,updated_at"
+            "&order=updated_at.desc&limit=500",
             headers=_supabase_headers(), timeout=10)
         rows = r.json() if r.status_code < 300 else []
         if q:
@@ -262,6 +263,43 @@ def get_employeur(num):
         if not rows:
             return jsonify({"error": "Employeur introuvable"}), 404
         return jsonify(rows[0]), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/employeurs/completer', methods=['POST'])
+def completer_employeur():
+    """Complète un dossier existant : merge les champs fournis dans `data` et repasse
+    le statut à 'pending' (le robot recalcule alors `manquants`). Ne touche PAS à
+    `numero_employeur` -> pas de ré-encodage Prisma (le dossier est déjà encodé)."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    if not verify_user_token(request):
+        return jsonify({"error": "Non authentifié"}), 401
+    d = request.get_json(silent=True) or {}
+    num = str(d.get('num_entreprise') or '').strip()
+    champs = d.get('data') if isinstance(d.get('data'), dict) else {}
+    if not num or not champs:
+        return jsonify({"error": "num_entreprise et data requis"}), 400
+    try:
+        import urllib.parse
+        nq = urllib.parse.quote(num)
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/employeurs?num_entreprise=eq.{nq}&select=data&limit=1",
+                         headers=_supabase_headers(), timeout=10)
+        rows = r.json() if r.status_code < 300 else []
+        if not rows:
+            return jsonify({"error": "Employeur introuvable"}), 404
+        data = rows[0].get('data') or {}
+        data.update(champs)                                  # merge : les nouveaux champs écrasent
+        hdr = {**_supabase_headers(), 'Content-Type': 'application/json', 'Prefer': 'return=representation'}
+        pr = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/employeurs?num_entreprise=eq.{nq}",
+            json={'data': data, 'statut': 'pending', 'updated_at': datetime.utcnow().isoformat()},
+            headers=hdr, timeout=10)
+        if pr.status_code >= 300:
+            return jsonify({"error": pr.text[:200]}), 500
+        out = pr.json()
+        return jsonify(out[0] if isinstance(out, list) and out else {"ok": True}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
