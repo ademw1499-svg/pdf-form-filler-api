@@ -241,7 +241,9 @@ def _valeurs(payload, identity, repertoire=None):
         'cadre_jour_debut': _jour(payload.get('ouverture_jour_debut'), lang),
         'cadre_jour_fin': _jour(payload.get('ouverture_jour_fin'), lang),
         'cadre_min': '3',
-        'cadre_max': ou(payload.get('max_journalier')) if payload.get('max_journalier') else '9',
+        # Cadre légal (loi 1/6/2026) : min 3h/jour, max 9h/jour (le max hebdo de 50h
+        # est ajouté en ligne séparée par _ajouter_max_hebdo, le modèle n'ayant pas de jeton).
+        'cadre_max': '9',
     }
     # Adresses des institutions depuis le répertoire (écrase les valeurs par défaut)
     v.update({k: val for k, val in _valeurs_institutions(payload, identity, repertoire).items() if val})
@@ -601,11 +603,54 @@ def _remplir_placeholders_litteraux(doc, valeurs):
             if t != r.text:
                 r.text = t
 
+    # Cadre NL : « ……….u en ………u » résiduel collé après la plage horaire -> on nettoie
+    for p in doc.paragraphs:
+        full = ''.join(r.text or '' for r in p.runs)
+        if 'arbeidsprestaties kunnen worden vastgesteld' in full and '…' in full:
+            apres = False
+            for r in p.runs:
+                t = r.text or ''
+                if not apres:
+                    if 'tussen' in t or 'vastgesteld' in t:
+                        apres = True
+                    continue
+                if t and set(t) <= set('….uen '):   # run purement résiduel (… . u e n espace)
+                    r.text = ''
+            break
+
     # Annexe 4 bien-être du modèle NL : pas de jetons, juste des labels « … is (zijn) : »
     # (le modèle FR utilise des jetons -> ces ancres NL n'y existent pas, no-op).
     _ajouter_apres_label(doc, 'preventieadviseur(s) is (zijn)', valeurs.get('personne_confiance'))
     _ajouter_apres_label(doc, 'Geweld, pesterijen en ongewenst seksueel gedrag op het werk is (zijn)',
                          valeurs.get('harcelement'))
+
+
+def _ajouter_max_hebdo(doc, lang):
+    """Ajoute la ligne « Maximum 50 heures par semaine … » juste après la durée
+    journalière maximale dans le cadre (Article 10 §2). La loi du 1/6/2026 exige cette
+    mention du max hebdomadaire ; le modèle n'a pas de jeton pour elle -> on l'insère."""
+    from docx.oxml import OxmlElement
+    from docx.text.paragraph import Paragraph
+    if lang != 'NL':
+        ancre, prefixe = 'durée journalière maximale de travail', '-\t'
+        texte = 'Maximum 50 heures par semaine selon les limites journalières maximales.'
+    else:
+        ancre, prefixe = 'maximale dagelijkse arbeidsduur', ''
+        texte = 'Maximum 50 uren per week volgens de maximale dagelijkse grenzen.'
+    for p in doc.paragraphs:
+        full = ''.join(r.text or '' for r in p.runs)
+        if ancre in full:
+            if '50' in full:                       # déjà présent -> ne pas dupliquer
+                return
+            new_p = OxmlElement('w:p')
+            p._p.addnext(new_p)
+            np = Paragraph(new_p, p._parent)
+            try:
+                np.style = p.style                 # même mise en forme que la ligne au-dessus
+            except Exception:
+                pass
+            np.add_run(prefixe + texte)
+            return
 
 
 def _ajouter_apres_label(doc, ancre, valeur):
@@ -674,6 +719,8 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
     _remplir_cameras(doc, nb_cam, lieux_cam, lang)
     # FR + NL : remplit les placeholders littéraux résiduels (Nom, No ONSS, annexe 5 NL)
     _remplir_placeholders_litteraux(doc, _valeurs(payload, identity, repertoire))
+    # Cadre horaire (loi 1/6/2026) : ajoute le max hebdomadaire (50h) après le max journalier
+    _ajouter_max_hebdo(doc, lang)
     # NB : les horaires générés vont dans un DOCUMENT SÉPARÉ (generer_doc_horaires),
     # plus le règlement lui-même, car ils peuvent faire des centaines de pages.
 

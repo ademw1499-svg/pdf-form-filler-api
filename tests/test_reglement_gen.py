@@ -364,6 +364,28 @@ class TestBuildReglement:
         i = txt.find('siège social')
         assert '1000' in txt[i:i + 80] and 'Bruxelles' in txt[i:i + 80]
 
+    def test_cadre_horaire_loi_2026(self):
+        # cadre Article 10 §2 : jours + heures + min 3h/max 9h/jour + max 50h/semaine
+        payload = {'reglement_langue': 'FR', 'commission_paritaire': '201',
+                   'ouverture_debut': '10:00', 'ouverture_fin': '00:00',
+                   'ouverture_jour_debut': 0, 'ouverture_jour_fin': 6}
+        txt = _texte(R.build_reglement(payload, {'nom_societe': 'X'}, _tpl(TPL_FR)))
+        assert 'de 10:00' in txt or '10:00' in txt
+        assert 'minimale de travail est de 3 heures' in txt
+        assert 'maximale de travail est de 9  heures' in txt or 'maximale de travail est de 9 heures' in txt
+        assert 'Maximum 50 heures par semaine' in txt
+
+    def test_cadre_nl_max_hebdo_et_sans_residu(self):
+        payload = {'reglement_langue': 'NL', 'commission_paritaire': '201',
+                   'ouverture_debut': '10:00', 'ouverture_fin': '00:00',
+                   'ouverture_jour_debut': 0, 'ouverture_jour_fin': 6}
+        txt = _texte(R.build_reglement(payload, {'nom_societe': 'X'}, _tpl(TPL_NL)))
+        assert 'Maximum 50 uren per week' in txt
+        assert '9 uren' in txt
+        # le résidu « ……….u en ………u » collé après la plage doit avoir disparu
+        i = txt.find('begrepen tussen')
+        assert '…' not in txt[i:i + 60]
+
     def test_pas_de_date_placeholder(self):
         txt = _texte(R.build_reglement({'reglement_langue': 'FR'}, {'nom_societe': 'X'}, _tpl(TPL_FR)))
         assert '[date]' not in txt
