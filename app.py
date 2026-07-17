@@ -1,6 +1,8 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from pypdf import PdfReader, PdfWriter
+from pypdf.generic import (ArrayObject, DecodedStreamObject, DictionaryObject,
+                           FloatObject, NameObject, NumberObject)
 from reportlab.pdfgen import canvas
 import io
 import os
@@ -1628,24 +1630,74 @@ def make_overlay(draw_fn):
     c.save()
     return p.getvalue()
 
+def _octets_contenu(page):
+    """Octets bruts du flux d'une page, sans repasser par ContentStream : le
+    sérialiseur de pypdf 3.17 (version épinglée) écrit « Q Q » en « QQ », ce qui
+    n'est plus un opérateur et laisse l'état graphique du template ouvert."""
+    c = page.get(NameObject('/Contents'))
+    if c is None:
+        return b''
+    c = c.get_object()
+    if isinstance(c, ArrayObject):
+        return b'\n'.join(s.get_object().get_data() for s in c)
+    return c.get_data()
+
+
+def _en_xobject(writer, page, etranger=False):
+    """Encapsule une page dans un Form XObject. L'opérateur Do sauvegarde et
+    restaure l'état graphique (PDF 32000-1, 8.10.2) : ni un clip resté ouvert ni
+    un q/Q déséquilibré ne peuvent déborder sur ce qui est dessiné ensuite.
+    etranger=True : la page vient d'un autre document, ses ressources doivent
+    être clonées dans le writer sinon les polices pointent dans le vide."""
+    xo = DecodedStreamObject()
+    xo.set_data(_octets_contenu(page))
+    mb = page.mediabox
+    xo[NameObject('/Type')] = NameObject('/XObject')
+    xo[NameObject('/Subtype')] = NameObject('/Form')
+    xo[NameObject('/FormType')] = NumberObject(1)
+    xo[NameObject('/BBox')] = ArrayObject([
+        FloatObject(mb.left), FloatObject(mb.bottom),
+        FloatObject(mb.right), FloatObject(mb.top)])
+    res = page.get(NameObject('/Resources'), DictionaryObject())
+    if etranger:
+        res = res.get_object().clone(writer)
+    xo[NameObject('/Resources')] = res
+    return writer._add_object(xo)
+
+
 def merge_selective(tpl_path, overlays):
     """
-    Merge overlays only onto specific pages.
-    overlays: dict {page_index: pdf_bytes}
-    Notre texte est dessiné PAR-DESSUS le template : pg.merge_page(ov) empile
-    l'overlay sur la page. (L'inverse masquerait le texte dès que le template a un
-    fond blanc opaque — ce qui est le cas des PDF exportés depuis Pages/Word.)
-    Les pages sans overlay passent intactes.
+    Superpose un calque sur certaines pages seulement. overlays: {index: pdf_bytes}
+    Les pages sans calque passent intactes.
+
+    On n'utilise PAS merge_page() : les templates exportés depuis Word/Pages
+    laissent un clip ouvert (le filet de bas de page, 455x3,4 pt) et la page
+    « contrat de mandat » a un q non refermé. Notre texte était alors dessiné
+    DANS cette bande minuscule -> présent dans le fichier, invisible à l'écran.
+    Template et calque sont donc chacun encapsulés dans un Form XObject, ce qui
+    confine leur état graphique. Vérifié identique au pixel sous pypdf 3.17.1
+    (prod) et 6.14.2 (local), sur les 41 pages FR+NL.
     """
-    # On clone D'ABORD tout le document dans le writer, PUIS on fusionne sur SES pages.
-    # (Muter les pages du reader dans une boucle ne fusionnait que la 1re page et
-    #  laissait les suivantes vides — piège pypdf.)
     wr = PdfWriter()
     wr.append(tpl_path)
     for i, ov_bytes in overlays.items():
-        if 0 <= i < len(wr.pages):
-            ov = PdfReader(io.BytesIO(ov_bytes))
-            wr.pages[i].merge_page(ov.pages[0])  # notre texte AU-DESSUS du template
+        if not (0 <= i < len(wr.pages)):
+            continue
+        page = wr.pages[i]
+        ov_page = PdfReader(io.BytesIO(ov_bytes)).pages[0]
+        ref_tpl = _en_xobject(wr, page)                      # le fond, dessous
+        ref_ovl = _en_xobject(wr, ov_page, etranger=True)    # notre texte, dessus
+        xdict = DictionaryObject()
+        xdict[NameObject('/__tpl')] = ref_tpl
+        xdict[NameObject('/__ovl')] = ref_ovl
+        res = DictionaryObject()
+        res[NameObject('/XObject')] = xdict
+        flux = DecodedStreamObject()
+        flux.set_data(b'q /__tpl Do Q\nq /__ovl Do Q\n')
+        # Les ressources du template vivent dans son propre XObject : en
+        # remplaçant /Resources on ne peut plus avoir de collision de noms.
+        page[NameObject('/Contents')] = wr._add_object(flux)
+        page[NameObject('/Resources')] = res
     out = io.BytesIO()
     wr.write(out)
     out.seek(0)
