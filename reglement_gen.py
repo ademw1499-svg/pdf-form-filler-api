@@ -11,11 +11,86 @@ blanc « ………… » que la gestionnaire complète.
 ⚠ Document = PROJET, à faire valider juridiquement avant dépôt.
 """
 import io
+import json
+import os
 import re
 from docx import Document
 from docx.oxml.ns import qn
 
 BLANK = '…………'
+
+# --- Données officielles embarquées (dossier donnees/, versionné avec le code) ----
+# Source : SPF Emploi. Régénérables avec les scripts documentés dans donnees/README.md.
+#   fse_{fr,nl}.json          : dénomination OFFICIELLE de chaque CP (point 9) +
+#                               son fonds de sécurité d'existence (point 4)
+#   institutions_controle.json: adresse des services de contrôle par province (art. 66)
+_DONNEES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'donnees')
+_CACHE = {}
+
+
+def _donnees(nom):
+    """Charge donnees/<nom>.json (une fois). {} si le fichier manque : le règlement
+    doit sortir même sans ces données, avec des blancs à compléter."""
+    if nom not in _CACHE:
+        try:
+            with open(os.path.join(_DONNEES, f'{nom}.json'), encoding='utf-8') as f:
+                _CACHE[nom] = json.load(f)
+        except (OSError, ValueError) as e:
+            print(f'[REGLEMENT] donnees/{nom}.json illisible : {e}')
+            _CACHE[nom] = {}
+    return _CACHE[nom]
+
+
+def _fse_info(cp, lang):
+    """{denomination, fonds:[…]} de la CP, depuis la liste officielle des Fonds de
+    sécurité d'existence (SPF Emploi). {} si la CP n'y figure pas."""
+    d = _donnees('fse_nl' if str(lang).upper() == 'NL' else 'fse_fr')
+    return d.get(_cp_norm(cp)) or {}
+
+
+def _fonds_principal(cp, lang):
+    """Le fonds à citer au point 4 : le premier fonds ADRESSABLE de la liste, c.-à-d.
+    le Fonds social / de sécurité d'existence — et non les fonds « 2e pilier » (pension
+    complémentaire), qui suivent et ne sont pas ce que vise le point 4.
+    None si la CP n'a pas de fonds ou si elle est trop imprécise pour trancher
+    (ex. CP 140 nue : chaque sous-secteur 140.01…140.09 a SON fonds)."""
+    return next((f for f in _fse_info(cp, lang).get('fonds', []) if f.get('adresse')), None)
+
+
+def _decoupe_adresse_plate(adr):
+    """« Quai de Willebroeck 37, 1000 BRUXELLES » -> (rue, n°, code postal, localité)."""
+    m = re.match(r'^(.*?),?\s*(\d{4})\s+([^,]+)$', (adr or '').strip())
+    if not m:
+        return '', '', '', ''
+    voie, cp, loc = m.group(1).strip(' ,'), m.group(2), m.group(3).strip()
+    mv = re.match(r'^(.*?[^\d\s])\s+(\d[\w\s/.-]*)$', voie)
+    return (mv.group(1).strip(), mv.group(2).strip(), cp, loc) if mv else (voie, '', cp, loc)
+
+
+# CP dont les lieux de travail changent en permanence : on n'y met PAS de siège
+# d'exploitation (chantiers pour la construction, itinéraires pour le transport).
+CP_SANS_SIEGE_EXPLOITATION = ('124', '140')
+
+
+def _sans_siege_exploitation(cps):
+    """True si l'une des CP du dossier est la construction (124) ou le transport (140),
+    sous-numéros compris (124.01, 140.03, …)."""
+    for cp in cps:
+        base = _cp_norm(cp).split('.')[0]
+        if base in CP_SANS_SIEGE_EXPLOITATION:
+            return True
+    return False
+
+
+def _cps_du_payload(payload):
+    """Toutes les CP du dossier, dans l'ordre : les régimes s'il y en a, sinon les
+    champs simples ouvrier/employé."""
+    regs = payload.get('regimes') if isinstance(payload.get('regimes'), list) else []
+    cps = [str(r.get('cp') or '') for r in regs if isinstance(r, dict) and r.get('cp')]
+    if not cps:
+        cps = [str(payload.get('commission_paritaire') or ''),
+               str(payload.get('cp_employe') or '')]
+    return [c for c in cps if _cp_norm(c)]
 
 JOURS_FR = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche']
 JOURS_NL = ['maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag', 'zondag']
@@ -68,25 +143,58 @@ def _jour(idx, lang):
         return str(idx)
 
 
-# Chaque institution du répertoire -> les jetons du modèle (Nom/Rue/N°/CP/Localité).
-INST_TOKENS = {
-    'caisse':            {'nom': 'Nom_1_institution_Inst_v1', 'rue': 'Rue_institution_Inst_v4',
-                          'no': 'No_de_la_maison_inst_Inst_v4', 'cp': 'Code_postal_Institutions_v4',
-                          'loc': 'Localité_institution_Inst_v4'},
-    'assurance':         {'nom': 'Nom_1_institution_Inst_v5', 'rue': 'Rue_institution_Inst_v3',
-                          'no': 'No_de_la_maison_inst_Inst_v3', 'cp': 'Code_postal_Institutions_v3',
-                          'loc': 'Localité_institution_Inst_v3'},
-    'fonds':             {'nom': 'Nom_1_institution_Inst_v4', 'rue': 'Rue_institution_Inst_v5',
-                          'no': 'No_de_la_maison_inst_Inst_v5', 'cp': 'Code_postal_Institutions_v5',
-                          'loc': 'Localité_institution_Inst_v5'},
-    'seppt':             {'nom': 'Nom_1_institution_Inst', 'rue': 'Rue_institution_Inst_v1',
-                          'no': 'No_de_la_maison_inst_Inst_v1', 'cp': 'Code_postal_Institutions_v1',
-                          'loc': 'Localité_institution_Inst_v1'},
-    'controle_lois':     {'rue': 'Rue_institution_Inst_v2', 'no': 'No_de_la_maison_inst_Inst_v2',
-                          'cp': 'Code_postal_Institutions_v2', 'loc': 'Localité_institution_Inst_v2'},
-    'controle_bienetre': {'rue': 'Rue_institution_Inst_v6', 'no': 'No_de_la_maison_inst_Inst_v6',
-                          'cp': 'Code_postal_Institutions_v6', 'loc': 'Localité_institution_Inst_v6'},
-}
+# Chaque institution -> les jetons du modèle (Nom/Rue/N°/CP/Localité).
+#
+# ⚠ Les modèles FR et NL ne numérotent PAS les jetons pareil : le même
+# {{Nom_1_institution_Inst_v1}} désigne la caisse de vacances en FR et l'assurance-loi
+# en NL. Une table unique (calée sur le FR) écrivait donc, dans tout règlement NL, la
+# caisse dans la case assurance et le SEPPT dans la case du fonds. D'où une table PAR
+# LANGUE. Relevé le 2026-07-17 directement dans les 2 .docx (Article 2 et Article 66) ;
+# à revérifier si les modèles Word changent — voir tests/test_reglement_gen.py.
+#
+#   suffixe   |        FR (Article 2)         |        NL (Artikel 2)
+#   ----------+-------------------------------+------------------------------
+#   (aucun)   | 6. SEPPT                      | 2. Kas voor jaarlijkse vakantie
+#   _v1       | 2. Caisse de vacances         | 3. Verzekeringsmaatschappij
+#   _v2       | (annexe)                      | 4. Fondsen voor bestaanszekerheid
+#   _v3       | (absent)                      | 6. Externe Dienst (SEPPT)
+#   _v4       | 4. Fonds de sécurité          | 8. Kantoor voor directe belastingen
+#   _v5       | 3. Assurance-loi              | (absent)
+def _toks(nom, suffixe):
+    s = f'_{suffixe}' if suffixe else ''
+    return {'nom': f'Nom_1_institution_Inst{s}' if nom else None,
+            'rue': f'Rue_institution_Inst{s}', 'no': f'No_de_la_maison_inst_Inst{s}',
+            'cp': f'Code_postal_Institutions{s}', 'loc': f'Localité_institution_Inst{s}'}
+
+
+def _inst_map(caisse, assurance, fonds, seppt, lois, bienetre):
+    """(suffixe du nom, suffixe de l'adresse) par institution — ils diffèrent en FR."""
+    m = {}
+    for cle, (sn, sa) in (('caisse', caisse), ('assurance', assurance), ('fonds', fonds),
+                          ('seppt', seppt)):
+        t = _toks(True, sn)
+        t.update({k: v for k, v in _toks(False, sa).items() if k != 'nom'})
+        m[cle] = t
+    for cle, sa in (('controle_lois', lois), ('controle_bienetre', bienetre)):
+        t = _toks(False, sa)
+        t.pop('nom')
+        m[cle] = t
+    return m
+
+
+INST_TOKENS_FR = _inst_map(caisse=('v1', 'v4'), assurance=('v5', 'v3'), fonds=('v4', 'v5'),
+                           seppt=('', 'v1'), lois='v2', bienetre='v6')
+# NL : « Inspectie van de sociale wetten » = Contrôle des lois sociales (_v5),
+#      « Medische inspectie » = Contrôle du bien-être au travail (_v6).
+INST_TOKENS_NL = _inst_map(caisse=('', 'v1'), assurance=('v1', 'v2'), fonds=('v2', 'v3'),
+                           seppt=('v3', 'v4'), lois='v5', bienetre='v6')
+
+
+def _inst_tokens(lang):
+    return INST_TOKENS_NL if str(lang).upper() == 'NL' else INST_TOKENS_FR
+
+
+INST_TOKENS = INST_TOKENS_FR      # compat : ancien nom, modèle FR
 
 
 def _province_from_cp(cp):
@@ -108,7 +216,43 @@ def _province_from_cp(cp):
     return ''
 
 
-def _valeurs_institutions(payload, identity, repertoire):
+def _valeurs_officielles(payload, identity, lang, cps):
+    """Valeurs issues des données officielles embarquées, sans le répertoire :
+      - point 4  : le fonds de sécurité d'existence de la CP (nom + adresse) ;
+      - article 66 : les services de contrôle compétents pour la province du client.
+    Le répertoire, s'il est rempli, écrase ces valeurs (cf. _valeurs)."""
+    out = {}
+    idd = identity or {}
+    _, _, cp_cli, _ = _decoupe_adresse(idd)
+    prov = _province_from_cp(cp_cli)
+
+    TOKS = _inst_tokens(lang)
+
+    # --- Point 4 : Fonds de sécurité d'existence ou Fonds social
+    fonds = next((_fonds_principal(c, lang) for c in cps if _fonds_principal(c, lang)), None)
+    if fonds:
+        rue, no, cpf, loc = _decoupe_adresse_plate(fonds.get('adresse'))
+        toks = TOKS['fonds']
+        out[toks['nom']] = fonds.get('nom') or ''
+        out[toks['rue']], out[toks['no']] = rue, no
+        out[toks['cp']], out[toks['loc']] = cpf, loc
+
+    # --- Article 66 : Contrôle des lois sociales + Contrôle du bien-être au travail
+    ctrl = _donnees('institutions_controle')
+    cle = 'nl' if str(lang).upper() == 'NL' else 'fr'
+    for typ in ('controle_lois', 'controle_bienetre'):
+        adr = (ctrl.get(typ) or {}).get(prov, {}).get(cle)
+        if not adr:
+            continue
+        toks = TOKS[typ]
+        out[toks['rue']] = adr.get('rue') or ''
+        out[toks['no']] = adr.get('no') or ''
+        out[toks['cp']] = adr.get('cp') or ''
+        out[toks['loc']] = adr.get('localite') or ''
+    return out
+
+
+def _valeurs_institutions(payload, identity, repertoire, lang='FR'):
     """Remplit les jetons d'adresses d'institutions depuis le répertoire.
     Assurance/caisse/SEPPT : par nom ; bureaux de contrôle : par province du client."""
     out = {}
@@ -117,9 +261,10 @@ def _valeurs_institutions(payload, identity, repertoire):
     idd = identity or {}
     _, _, cp_cli, _ = _decoupe_adresse(idd)
     prov = _province_from_cp(cp_cli)
+    TOKS = _inst_tokens(lang)
 
     def pose(inst, typ):
-        toks = INST_TOKENS.get(typ, {})
+        toks = TOKS.get(typ, {})
         if toks.get('nom') and inst.get('nom'):
             out[toks['nom']] = inst['nom']
         if toks.get('rue'):
@@ -189,7 +334,9 @@ def _valeurs(payload, identity, repertoire=None):
     if len(ent) == 9:
         ent = '0' + ent
     ent_fmt = f"{ent[0:4]}.{ent[4:7]}.{ent[7:10]}" if len(ent) == 10 else (ent or BLANK)
-    cpnum = re.sub(r'\D', '', payload.get('commission_paritaire', '') or '')
+    # _cp_norm et pas re.sub(r'\D') : « 140.03 » doit rester « 140.03 », pas « 14003 ».
+    cpnum = _cp_norm(payload.get('commission_paritaire', '') or '')
+    cps = _cps_du_payload(payload)
     adr1 = (idd.get('adresse_siege_social_1') or '').strip()
 
     def ou(v):  # valeur ou blanc
@@ -218,10 +365,8 @@ def _valeurs(payload, identity, repertoire=None):
         'No_de_la_maison_inst_Inst': '11',
         'Code_postal_Institutions': '1060',
         'Localité_institution_Inst': 'Bruxelles',
-        # --- Noms d'institutions sans ambiguïté dans le modèle ---
-        'Nom_1_institution_Inst_v5': ou(payload.get('assurance_loi')),   # assurance-loi
-        'Nom_1_institution_Inst_v1': ou(payload.get('caisse_vacances')),  # caisse de vacances
-        'Nom_1_institution_Inst_v2': ou(payload.get('seppt')),           # conseiller prévention externe (SEPPT)
+        # (les noms d'institutions sont posés plus bas : leurs jetons dépendent de la
+        #  langue du modèle — cf. INST_TOKENS_FR / INST_TOKENS_NL)
         # --- Annexe 4 (bien-être) + Annexe 5 (lieux) ---
         'ps_nom1': ou(payload.get('premiers_soins_noms')),
         'ps_lieu1': ou(payload.get('premiers_soins_lieux')),
@@ -233,8 +378,12 @@ def _valeurs(payload, identity, repertoire=None):
         'harcelement': ou((_pdc_du_seppt(payload.get('seppt')) or {}).get('harc')),
         # sièges d'exploitation (annexe 5) : vraies unités d'établissement BCE si
         # disponibles (identity['sieges_exploitation']), sinon repli sur le siège social
-        'sieges_exploitation': ou(idd.get('sieges_exploitation')
-                                  or ' — '.join(x for x in [adr1, (idd.get('adresse_siege_social_2') or '').strip()] if x)),
+        # Construction (CP 124) et transport (CP 140) : PAS de siège d'exploitation —
+        # chantiers et itinéraires changent en permanence, une adresse figée serait
+        # fausse dès le lendemain.
+        'sieges_exploitation': BLANK if _sans_siege_exploitation(cps) else ou(
+            idd.get('sieges_exploitation')
+            or ' — '.join(x for x in [adr1, (idd.get('adresse_siege_social_2') or '').strip()] if x)),
         # --- Cadre horaire (Article 10 §2) depuis les heures d'ouverture ---
         'cadre_debut': ou(payload.get('ouverture_debut')),
         'cadre_fin': ou(payload.get('ouverture_fin')),
@@ -245,10 +394,62 @@ def _valeurs(payload, identity, repertoire=None):
         # est ajouté en ligne séparée par _ajouter_max_hebdo, le modèle n'ayant pas de jeton).
         'cadre_max': '9',
     }
-    # Adresses des institutions depuis le répertoire (écrase les valeurs par défaut)
-    v.update({k: val for k, val in _valeurs_institutions(payload, identity, repertoire).items() if val})
+    # 1) noms d'institutions saisis au formulaire, dans le jeton de LA BONNE langue
+    TOKS = _inst_tokens(lang)
+    for typ, champ in (('assurance', 'assurance_loi'), ('caisse', 'caisse_vacances'),
+                       ('seppt', 'seppt')):
+        val = payload.get(champ)
+        if val:
+            v[TOKS[typ]['nom']] = str(val).strip()
+    # 2) données officielles embarquées (fonds de la CP, services de contrôle)
+    v.update({k: val for k, val in _valeurs_officielles(payload, identity, lang, cps).items() if val})
+    # 3) puis le répertoire : ce que la gestionnaire a saisi elle-même fait foi
+    v.update({k: val for k, val in
+              _valeurs_institutions(payload, identity, repertoire, lang).items() if val})
     # Tout jeton non couvert -> BLANK (renseigné dynamiquement au remplissage)
     return v
+
+
+def _remplacer_dans_paragraphe(p, motif, remplacement):
+    """Remplace `motif` dans un paragraphe MÊME s'il est éclaté sur plusieurs runs.
+    Word découpe le texte au moindre changement (« (annexe n » / « ° » / « 10). ») :
+    chercher run par run ne trouverait rien. On reconstitue le texte, on repère la
+    correspondance, et on ne réécrit que les runs concernés — la mise en forme des
+    autres est préservée. True si un remplacement a eu lieu."""
+    runs = p.runs
+    textes = [r.text or '' for r in runs]
+    m = re.search(motif, ''.join(textes), re.I)
+    if not m:
+        return False
+    deb, fin = m.span()
+    pos, bornes = 0, []
+    for t in textes:
+        bornes.append((pos, pos + len(t)))
+        pos += len(t)
+    ecrit = False
+    for k, (a, b) in enumerate(bornes):
+        if b <= deb or a >= fin:
+            continue
+        avant = textes[k][:max(0, deb - a)]
+        apres = textes[k][fin - a:] if fin <= b else ''
+        runs[k].text = (avant + remplacement + apres) if not ecrit else (avant + apres)
+        ecrit = True
+    return True
+
+
+def _corriger_renvoi_annexe(doc, lang):
+    """Article 4 (Exemplaire pour le travailleur) : le modèle renvoie à l'annexe 10,
+    or l'annexe 10 est « Politique de maintien du contact avec les travailleurs en
+    incapacité » — l'accusé de réception dont parle l'article est l'annexe 11
+    (« Accusé de réception » / « Ontvangstbewijs »). Erreur du modèle Word, corrigée
+    ici à la génération (le .docx source est sur Supabase Storage, hors du dépôt).
+    Ne touche NI la table des matières NI le titre de l'annexe 10, qui sont sans
+    parenthèses. No-op si le modèle est corrigé un jour."""
+    if str(lang).upper() == 'NL':
+        motif, rempl = r'\(\s*zie\s+bijlage\s*n\s*r\.?\s*10\s*\)', '(zie bijlage nr. 11)'
+    else:
+        motif, rempl = r'\(\s*annexe\s*n\s*°\s*10\s*\)', '(annexe n° 11)'
+    return sum(1 for p in doc.paragraphs if _remplacer_dans_paragraphe(p, motif, rempl))
 
 
 def _remplir_jetons(doc, valeurs, sequentiels=None):
@@ -690,28 +891,46 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
         if isinstance(payload.get('regimes'), list) else []
     if regs:
         def _cpn(i):
-            return re.sub(r'\D', '', str(regs[i].get('cp') or '')) if i < len(regs) else ''
+            # _cp_norm : « 140.03 » doit s'imprimer « 140.03 », pas « 14003 ».
+            return _cp_norm(regs[i].get('cp')) if i < len(regs) else ''
         def _den(i):
+            # Dénomination OFFICIELLE (liste des Fonds de sécurité d'existence du SPF
+            # Emploi). On n'utilise PAS regs[i]['label'] : c'est le libellé libre de
+            # l'écran (« Car-wash », « Nettoyage »), un surnom interne — l'imprimer ici
+            # donnait « Dénomination : Car-wash » au lieu de la dénomination légale.
             if i >= len(regs):
                 return ''
-            lbl = (regs[i].get('label') or regs[i].get('denomination') or '').strip()
-            return lbl or _cp_info(lut, regs[i].get('cp')).get('denom', '')
+            return (_fse_info(regs[i].get('cp'), lang).get('denomination')
+                    or _cp_info(lut, regs[i].get('cp')).get('denom', '')
+                    or (regs[i].get('denomination') or '').strip())
         cp_ouv = _cpn(0) or BLANK
         cp_emp = _cpn(1) or BLANK
         den_ouv = _den(0) or BLANK
         den_emp = _den(1) or BLANK
     else:
-        cp_ouv = re.sub(r'\D', '', str(payload.get('commission_paritaire') or '')) or BLANK
-        cp_emp = re.sub(r'\D', '', str(payload.get('cp_employe') or '')) or BLANK
-        den_ouv = ((payload.get('cp_ouvrier_denomination') or '').strip()
-                   or _cp_info(lut, payload.get('commission_paritaire')).get('denom', '')) or BLANK
-        den_emp = ((payload.get('cp_employe_denomination') or '').strip()
-                   or _cp_info(lut, payload.get('cp_employe')).get('denom', '')) or BLANK
+        def _den_simple(cp, saisi):
+            return ((_fse_info(cp, lang).get('denomination')
+                     or _cp_info(lut, cp).get('denom', '')
+                     or (saisi or '').strip()) or BLANK)
+        cp_ouv = _cp_norm(payload.get('commission_paritaire')) or BLANK
+        cp_emp = _cp_norm(payload.get('cp_employe')) or BLANK
+        den_ouv = _den_simple(payload.get('commission_paritaire'),
+                              payload.get('cp_ouvrier_denomination'))
+        den_emp = _den_simple(payload.get('cp_employe'),
+                              payload.get('cp_employe_denomination'))
+    valeurs = _valeurs(payload, identity, repertoire)
     sequentiels = {
         'Commission_paritaire_Em': [cp_ouv, cp_emp],
         'Commission_paritaire_Em_v1': [den_ouv, den_emp],
     }
-    _remplir_jetons(doc, _valeurs(payload, identity, repertoire), sequentiels)
+    if lang != 'NL':
+        # Le modèle FR réutilise {{Nom_1_institution_Inst}} pour le point 6 (SEPPT)
+        # PUIS le point 8 (Bureau des contributions directes) : sans remplacement
+        # positionnel, le nom du SEPPT s'imprime aussi comme bureau des contributions.
+        # 1ʳᵉ occurrence = SEPPT, 2ᵉ = blanc à compléter. (Le NL n'a pas ce doublon.)
+        sequentiels['Nom_1_institution_Inst'] = [
+            valeurs.get('Nom_1_institution_Inst', BLANK), BLANK]
+    _remplir_jetons(doc, valeurs, sequentiels)
     # Annexe 7 — caméras de surveillance (défaut 0 si le client n'en a pas)
     nb_cam = str(payload.get('nombre_cameras') or payload.get('cameras') or '').strip() or '0'
     lieux_cam = (payload.get('cameras_emplacement') or '').strip() or (
@@ -721,6 +940,8 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
     _remplir_placeholders_litteraux(doc, _valeurs(payload, identity, repertoire))
     # Cadre horaire (loi 1/6/2026) : ajoute le max hebdomadaire (50h) après le max journalier
     _ajouter_max_hebdo(doc, lang)
+    # Article 4 : le renvoi doit viser l'annexe 11 (accusé de réception), pas la 10
+    _corriger_renvoi_annexe(doc, lang)
     # NB : les horaires générés vont dans un DOCUMENT SÉPARÉ (generer_doc_horaires),
     # plus le règlement lui-même, car ils peuvent faire des centaines de pages.
 

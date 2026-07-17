@@ -1,0 +1,314 @@
+{
+ "controle_bienetre": {
+  "Anvers": {
+   "fr": {
+    "cp": "2000",
+    "localite": "Antwerpen",
+    "no": "124 - bus 77",
+    "rue": "Italiëlei"
+   },
+   "nl": {
+    "cp": "2000",
+    "localite": "Antwerpen",
+    "no": "124 - bus 77",
+    "rue": "Italiëlei"
+   }
+  },
+  "Brabant flamand": {
+   "fr": {
+    "cp": "3001",
+    "localite": "Leuven",
+    "no": "3A - bus 8",
+    "rue": "Philipssite"
+   },
+   "nl": {
+    "cp": "3001",
+    "localite": "Leuven",
+    "no": "3A - bus 8",
+    "rue": "Philipssite"
+   }
+  },
+  "Brabant wallon": {
+   "fr": {
+    "cp": "5000",
+    "localite": "Namur",
+    "no": "25",
+    "rue": "Place des Célestines"
+   },
+   "nl": {
+    "cp": "5000",
+    "localite": "Namur",
+    "no": "25",
+    "rue": "Place des Célestines"
+   }
+  },
+  "Bruxelles": {
+   "fr": {
+    "cp": "1070",
+    "localite": "Bruxelles",
+    "no": "1",
+    "rue": "Rue Ernest Blerot"
+   },
+   "nl": {
+    "cp": "1070",
+    "localite": "Brussel",
+    "no": "1",
+    "rue": "Ernest Blerotstraat"
+   }
+  },
+  "Flandre occidentale": {
+   "fr": {
+    "cp": "8200",
+    "localite": "Bruges",
+    "no": "1-5 bus 4",
+    "rue": "Koning Albert I laan"
+   },
+   "nl": {
+    "cp": "8200",
+    "localite": "Brugge",
+    "no": "1-5 bus 4",
+    "rue": "Koning Albert I laan"
+   }
+  },
+  "Flandre orientale": {
+   "fr": {
+    "cp": "9000",
+    "localite": "Gent",
+    "no": "26/202",
+    "rue": "Ketelvest"
+   },
+   "nl": {
+    "cp": "9000",
+    "localite": "Gent",
+    "no": "26/202",
+    "rue": "Ketelvest"
+   }
+  },
+  "Hainaut": {
+   "fr": {
+    "cp": "7000",
+    "localite": "Mons",
+    "no": "1",
+    "rue": "Rue du Chapitre"
+   },
+   "nl": {
+    "cp": "7000",
+    "localite": "Mons",
+    "no": "1",
+    "rue": "Rue du Chapitre"
+   }
+  },
+  "Limbourg": {
+   "fr": {
+    "cp": "3001",
+    "localite": "Leuven",
+    "no": "3A - bus 8",
+    "rue": "Philipssite"
+   },
+   "nl": {
+    "cp": "3001",
+    "localite": "Leuven",
+    "no": "3A - bus 8",
+    "rue": "Philipssite"
+   }
+  },
+  "Liège": {
+   "fr": {
+    "cp": "4000",
+    "localite": "LIEGE",
+    "no": "2 boite 205",
+    "rue": "Rue de Fragnée"
+   },
+   "nl": {
+    "cp": "4000",
+    "localite": "Luik",
+    "no": "2 boite 205",
+    "rue": "Rue de Fragnée"
+   }
+  },
+  "Luxembourg": {
+   "fr": {
+    "cp": "5000",
+    "localite": "Namur",
+    "no": "25",
+    "rue": "Place des Célestines"
+   },
+   "nl": {
+    "cp": "5000",
+    "localite": "Namur",
+    "no": "25",
+    "rue": "Place des Célestines"
+   }
+  },
+  "Namur": {
+   "fr": {
+    "cp": "5000",
+    "localite": "Namur",
+    "no": "25",
+    "rue": "Place des Célestines"
+   },
+   "nl": {
+    "cp": "5000",
+    "localite": "Namur",
+    "no": "25",
+    "rue": "Place des Célestines"
+   }
+  }
+ },
+ "controle_lois": {
+  "Anvers": {
+   "fr": {
+    "cp": "2000",
+    "localite": "Antwerpen",
+    "no": "124 - bus 56",
+    "rue": "Italiëlei"
+   },
+   "nl": {
+    "cp": "2000",
+    "localite": "Antwerpen",
+    "no": "124 - bus 56",
+    "rue": "Italiëlei"
+   }
+  },
+  "Brabant flamand": {
+   "fr": {
+    "cp": "3500",
+    "localite": "Hasselt",
+    "no": "43 bus 03 02",
+    "rue": "Voorstraat"
+   },
+   "nl": {
+    "cp": "3500",
+    "localite": "Hasselt",
+    "no": "43 bus 03 02",
+    "rue": "Voorstraat"
+   }
+  },
+  "Brabant wallon": {
+   "fr": {
+    "cp": "5000",
+    "localite": "Namur",
+    "no": "25",
+    "rue": "Place des Célestines"
+   },
+   "nl": {
+    "cp": "5000",
+    "localite": "Namur",
+    "no": "25",
+    "rue": "Place des Célestines"
+   }
+  },
+  "Bruxelles": {
+   "fr": {
+    "cp": "1070",
+    "localite": "Bruxelles",
+    "no": "1",
+    "rue": "Rue Ernest Blerot"
+   },
+   "nl": {
+    "cp": "1070",
+    "localite": "Brussel",
+    "no": "1",
+    "rue": "Ernest Blerotstraat"
+   }
+  },
+  "Flandre occidentale": {
+   "fr": {
+    "cp": "8200",
+    "localite": "Brugge",
+    "no": "1-5 bus 4",
+    "rue": "Koning Albert I laan"
+   },
+   "nl": {
+    "cp": "8200",
+    "localite": "Brugge",
+    "no": "1-5 bus 4",
+    "rue": "Koning Albert I laan"
+   }
+  },
+  "Flandre orientale": {
+   "fr": {
+    "cp": "9000",
+    "localite": "Gent",
+    "no": "11/002",
+    "rue": "Savaanstraat"
+   },
+   "nl": {
+    "cp": "9000",
+    "localite": "Gent",
+    "no": "11/002",
+    "rue": "Savaanstraat"
+   }
+  },
+  "Hainaut": {
+   "fr": {
+    "cp": "7000",
+    "localite": "Mons",
+    "no": "8",
+    "rue": "Rue du Miroir"
+   },
+   "nl": {
+    "cp": "7000",
+    "localite": "Mons",
+    "no": "8",
+    "rue": "rue du Miroir"
+   }
+  },
+  "Limbourg": {
+   "fr": {
+    "cp": "3500",
+    "localite": "Hasselt",
+    "no": "43 bus 03 02",
+    "rue": "Voorstraat"
+   },
+   "nl": {
+    "cp": "3500",
+    "localite": "Hasselt",
+    "no": "43 bus 03 02",
+    "rue": "Voorstraat"
+   }
+  },
+  "Liège": {
+   "fr": {
+    "cp": "4000",
+    "localite": "LIEGE",
+    "no": "2 boite 205",
+    "rue": "Rue de Fragnée"
+   },
+   "nl": {
+    "cp": "4000",
+    "localite": "LIEGE",
+    "no": "2 boite 205",
+    "rue": "Rue de Fragnée"
+   }
+  },
+  "Luxembourg": {
+   "fr": {
+    "cp": "5000",
+    "localite": "Namur",
+    "no": "25",
+    "rue": "Place des Célestines"
+   },
+   "nl": {
+    "cp": "5000",
+    "localite": "Namur",
+    "no": "25",
+    "rue": "Place des Célestines"
+   }
+  },
+  "Namur": {
+   "fr": {
+    "cp": "5000",
+    "localite": "Namur",
+    "no": "25",
+    "rue": "Place des Célestines"
+   },
+   "nl": {
+    "cp": "5000",
+    "localite": "Namur",
+    "no": "25",
+    "rue": "Place des Célestines"
+   }
+  }
+ }
+}
