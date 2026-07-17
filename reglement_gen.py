@@ -898,6 +898,41 @@ def _ajouter_max_hebdo(doc, lang):
             return
 
 
+def _ajouter_fonds_employe(doc, lang, fonds):
+    """Point 4 : le modèle n'a qu'UN emplacement de fonds, rempli avec le fonds
+    ouvrier. Quand la société a aussi un régime employé dont le fonds est DIFFÉRENT
+    (ex. KNS : ouvrier 140.03 transport + employé 226 commerce international), on
+    injecte le fonds employé juste avant le point 5 « Agence fédérale ». Sans ça, le
+    fonds employé était purement et simplement perdu.
+    `fonds` : dict {nom, adresse} ou None (no-op)."""
+    if not fonds or not fonds.get('nom'):
+        return
+    from docx.oxml import OxmlElement
+    from docx.text.paragraph import Paragraph
+    if str(lang).upper() == 'NL':
+        ancre = "Federaal agentschap voor beroepsrisico"
+        texte = f"Fonds voor bestaanszekerheid voor de bedienden : {fonds['nom']}"
+    else:
+        ancre = 'Agence fédérale des risques professionnels'
+        texte = f"Fonds de sécurité d'existence pour les employés : {fonds['nom']}"
+    if fonds.get('adresse'):
+        texte += f" — {fonds['adresse']}"
+    for p in doc.paragraphs:
+        full = ''.join(r.text or '' for r in p.runs)
+        if texte[:40] in full:            # déjà injecté -> ne pas dupliquer
+            return
+        if ancre in full:
+            new_p = OxmlElement('w:p')
+            p._p.addprevious(new_p)       # AVANT le point 5, donc à la fin du point 4
+            np = Paragraph(new_p, p._parent)
+            try:
+                np.style = p.style
+            except Exception:
+                pass
+            np.add_run(texte)
+            return
+
+
 def _ajouter_apres_label(doc, ancre, valeur):
     """Ajoute `valeur` à la fin du 1er paragraphe contenant `ancre` (label NL qui finit
     par « : »). No-op si `valeur` est vide/BLANK, si l'ancre est absente, ou si la valeur
@@ -986,6 +1021,12 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
     _ajouter_max_hebdo(doc, lang)
     # Article 4 : le renvoi doit viser l'annexe 11 (accusé de réception), pas la 10
     _corriger_renvoi_annexe(doc, lang)
+    # Point 4 : si un fonds EMPLOYÉ distinct existe (société ouvriers + employés),
+    # l'ajouter — le modèle n'a qu'un emplacement, rempli avec le fonds ouvrier.
+    f_ouv = _fonds_principal(cp_ouv, lang) if cp_ouv != BLANK else None
+    f_emp = _fonds_principal(cp_emp, lang) if cp_emp != BLANK else None
+    if f_emp and (not f_ouv or f_emp.get('nom') != f_ouv.get('nom')):
+        _ajouter_fonds_employe(doc, lang, f_emp)
     # NB : les horaires générés vont dans un DOCUMENT SÉPARÉ (generer_doc_horaires),
     # plus le règlement lui-même, car ils peuvent faire des centaines de pages.
 

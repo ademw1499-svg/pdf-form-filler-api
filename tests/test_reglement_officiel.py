@@ -424,6 +424,44 @@ def test_cp200_denomination_sans_coquille():
     assert 'employers' not in gen('FR', ['200'])
 
 
+@pytest.mark.parametrize('lang,attendu_nom', [
+    ('FR', 'Fonds social de la commission paritaire pour les employés du commerce '
+           'international, du transport et de la logistique'),
+    ('NL', 'Sociaal Fonds van het Paritair Comité voor de bedienden uit de '
+           'internationale handel'),
+])
+def test_point4_deux_fonds_ouvrier_et_employe(lang, attendu_nom):
+    """Société ouvriers + employés (KNS : 140.03 + 226) : le point 4 doit montrer les
+    DEUX fonds. Le modèle n'a qu'un emplacement -> le fonds employé est injecté.
+    Sans ça il était perdu (constaté sur le vrai document rempli à la main)."""
+    t = gen(lang, ['140.03', '226'])
+    # le fonds ouvrier (140.03) est dans l'emplacement du point 4
+    assert ('Fonds social pour les ouvriers des entreprises des services publics'
+            in t if lang == 'FR' else
+            'Sociaal Fonds voor werklieden van de ondernemingen' in t)
+    # le fonds employé (226) est injecté, avec son adresse
+    label = 'pour les employés :' if lang == 'FR' else 'voor de bedienden :'
+    i = t.find(label)
+    assert i >= 0, f'{lang} : fonds employé non injecté'
+    suite = t[i:i + 180]
+    assert attendu_nom[:50] in suite, f'{lang} : mauvais fonds employé -> {suite[:90]!r}'
+    assert 'ANTWERPEN' in suite or 'Antwerpen' in suite, f'{lang} : adresse du fonds employé absente'
+
+
+def test_point4_une_seule_cp_pas_de_second_fonds():
+    """Une société à une seule CP ne doit pas voir de ligne « fonds employé »."""
+    t = gen('FR', ['124'])
+    assert 'pour les employés :' not in t
+
+
+def test_point4_deux_cp_meme_fonds_pas_de_doublon():
+    """Deux régimes qui partagent le même fonds (ex. deux sous-CP du même secteur) :
+    on n'injecte pas un doublon."""
+    t = gen('FR', ['112', '112'])
+    assert t.count('Fonds social des entreprises de garage') == 1
+    assert 'pour les employés :' not in t
+
+
 def test_fr_bureau_des_contributions_nest_pas_le_seppt():
     """Le modèle FR réutilise {{Nom_1_institution_Inst}} au point 6 (SEPPT) ET au
     point 8 : sans remplacement positionnel, « Mensura » s'imprimait comme bureau
