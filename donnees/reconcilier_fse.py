@@ -39,7 +39,15 @@ CORRECTIONS_NL = {
     ),
 }
 
+# Coquilles de dénomination sur la page FR du SPF. {CP: (fautif, corrigé)}.
+# CP 200 : « employers » (anglais) pour « employés » — visible sur les règlements réels.
+CORRECTIONS_DENOM_FR = {
+    '200': ('Commission paritaire auxiliaire pour les employers',
+            'Commission paritaire auxiliaire pour les employés'),
+}
+
 NL_P = sys.argv[1]
+FR_P = sys.argv[2] if len(sys.argv) > 2 else None
 nl = json.load(open(NL_P, encoding='utf-8'))
 
 applique = obsolete = 0
@@ -62,4 +70,19 @@ for cp, (faux, bon, preuve) in CORRECTIONS_NL.items():
 
 json.dump(nl, open(NL_P, 'w', encoding='utf-8'), ensure_ascii=False, indent=1,
           sort_keys=True)
-print(f'{applique} correction(s) appliquée(s), {obsolete} devenue(s) inutile(s) -> {NL_P}')
+print(f'{applique} correction(s) NL appliquée(s), {obsolete} devenue(s) inutile(s) -> {NL_P}')
+
+if FR_P:
+    fr = json.load(open(FR_P, encoding='utf-8'))
+    nd = 0
+    for cp, (faux, bon) in CORRECTIONS_DENOM_FR.items():
+        v = fr.get(cp)
+        if v and v.get('denomination') == faux:
+            v['denomination'] = bon
+            nd += 1
+            print(f'  ! CP {cp} : dénomination « {faux} » -> « {bon} »')
+        elif v:
+            print(f'  = CP {cp} : « {faux} » introuvable — correction devenue inutile')
+    json.dump(fr, open(FR_P, 'w', encoding='utf-8'), ensure_ascii=False, indent=1,
+              sort_keys=True)
+    print(f'{nd} dénomination(s) FR corrigée(s) -> {FR_P}')

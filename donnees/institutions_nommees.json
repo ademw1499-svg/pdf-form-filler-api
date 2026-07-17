@@ -1,0 +1,190 @@
+{
+ "caisse_vacances": {
+  "fr": {
+   "cp": "1000",
+   "localite": "BRUXELLES",
+   "no": "48",
+   "nom": "Office National des Vacances Annuelles",
+   "rue": "Rue Montagne aux Herbes Potagères"
+  },
+  "nl": {
+   "cp": "1000",
+   "localite": "Brussel",
+   "no": "48",
+   "nom": "Rijksdienst voor Jaarlijkse Vakantie",
+   "rue": "Warmoesberg"
+  }
+ },
+ "seppt": [
+  {
+   "cle": "clb",
+   "fr": {
+    "cp": "3570",
+    "localite": "Alken",
+    "no": "1085",
+    "nom": "CLB EDPB asbl",
+    "rue": "Industrieterrein Kolmen"
+   },
+   "nl": {
+    "cp": "3570",
+    "localite": "Alken",
+    "no": "1085",
+    "nom": "CLB EDPB vzw",
+    "rue": "Industrieterrein Kolmen"
+   }
+  },
+  {
+   "cle": "attentia",
+   "fr": {
+    "cp": "1082",
+    "localite": "Bruxelles",
+    "no": "584, boîte 1",
+    "nom": "ATTENTIA Prévention et Protection asbl",
+    "rue": "Avenue Charles-Quint"
+   },
+   "nl": {
+    "cp": "1082",
+    "localite": "Brussel",
+    "no": "584, bus 1",
+    "nom": "ATTENTIA Preventie en Bescherming vzw",
+    "rue": "Keizer Karellaan"
+   }
+  },
+  {
+   "cle": "cesi",
+   "fr": {
+    "cp": "1200",
+    "localite": "Woluwe-Saint-Lambert",
+    "no": "8",
+    "nom": "CESI asbl",
+    "rue": "Avenue Konrad Adenauer"
+   },
+   "nl": {
+    "cp": "1200",
+    "localite": "Sint-Lambrechts-Woluwe",
+    "no": "8",
+    "nom": "CESI vzw",
+    "rue": "Konrad Adenauerlaan"
+   }
+  },
+  {
+   "cle": "cohezio",
+   "fr": {
+    "cp": "1000",
+    "localite": "Bruxelles",
+    "no": "1-8",
+    "nom": "COHEZIO asbl",
+    "rue": "Boulevard Bischoffsheim"
+   },
+   "nl": {
+    "cp": "1000",
+    "localite": "Brussel",
+    "no": "1-8",
+    "nom": "COHEZIO vzw",
+    "rue": "Bischoffsheimlaan"
+   }
+  },
+  {
+   "cle": "idewe",
+   "fr": {
+    "cp": "3001",
+    "localite": "Louvain",
+    "no": "58",
+    "nom": "IDEWE asbl",
+    "rue": "Interleuvenlaan"
+   },
+   "nl": {
+    "cp": "3001",
+    "localite": "Leuven",
+    "no": "58",
+    "nom": "IDEWE vzw",
+    "rue": "Interleuvenlaan"
+   }
+  },
+  {
+   "cle": "liantis",
+   "fr": {
+    "cp": "1000",
+    "localite": "Bruxelles",
+    "no": "37",
+    "nom": "LIANTIS SEPP asbl",
+    "rue": "Quai de Willebroek"
+   },
+   "nl": {
+    "cp": "1000",
+    "localite": "Brussel",
+    "no": "37",
+    "nom": "LIANTIS EDPB vzw",
+    "rue": "Willebroekkaai"
+   }
+  },
+  {
+   "cle": "mediwet",
+   "fr": {
+    "cp": "9000",
+    "localite": "Gand",
+    "no": "143",
+    "nom": "MEDIWET asbl",
+    "rue": "Opvoedingstraat"
+   },
+   "nl": {
+    "cp": "9000",
+    "localite": "Gent",
+    "no": "143",
+    "nom": "MEDIWET vzw",
+    "rue": "Opvoedingstraat"
+   }
+  },
+  {
+   "cle": "mensura",
+   "fr": {
+    "cp": "1210",
+    "localite": "Saint-Josse-ten-Noode",
+    "no": "21 boîte 9",
+    "nom": "MENSURA SEPP asbl",
+    "rue": "Avenue du Boulevard"
+   },
+   "nl": {
+    "cp": "1210",
+    "localite": "Sint-Joost-ten-Node",
+    "no": "21 bus 9",
+    "nom": "MENSURA EDPB vzw",
+    "rue": "Bolwerklaan"
+   }
+  },
+  {
+   "cle": "premed",
+   "fr": {
+    "cp": "3010",
+    "localite": "Louvain",
+    "no": "61/2",
+    "nom": "PREMED asbl",
+    "rue": "Tiensevest"
+   },
+   "nl": {
+    "cp": "3010",
+    "localite": "Leuven",
+    "no": "61/2",
+    "nom": "PREMED vzw",
+    "rue": "Tiensevest"
+   }
+  },
+  {
+   "cle": "securex",
+   "fr": {
+    "cp": "1040",
+    "localite": "Bruxelles",
+    "no": "43",
+    "nom": "SECUREX Prévention et Protection asbl",
+    "rue": "Avenue de Tervueren"
+   },
+   "nl": {
+    "cp": "1040",
+    "localite": "Brussel",
+    "no": "43",
+    "nom": "SECUREX Preventie en Bescherming vzw",
+    "rue": "Tervurenlaan"
+   }
+  }
+ ]
+}

@@ -240,6 +240,32 @@ def _valeurs_officielles(payload, identity, lang, cps):
     prov = _province_from_cp(cp_cli)
 
     TOKS = _inst_tokens(lang)
+    cle = 'nl' if str(lang).upper() == 'NL' else 'fr'
+    nommees = _donnees('institutions_nommees')
+
+    def pose_bloc(typ, adr, nom=None):
+        toks = TOKS[typ]
+        if toks.get('nom') and (nom or adr.get('nom')):
+            out[toks['nom']] = nom or adr['nom']
+        out[toks['rue']], out[toks['no']] = adr.get('rue', ''), adr.get('no', '')
+        out[toks['cp']], out[toks['loc']] = adr.get('cp', ''), adr.get('localite', '')
+
+    # --- Point 2 : Caisse de vacances annuelles. Un seul organisme national, deux noms
+    # selon la langue du règlement : ONVA en FR, RJV en NL. Un nom saisi au formulaire
+    # reste prioritaire (cf. _valeurs), mais son adresse ne serait alors pas la bonne.
+    caisse = (nommees.get('caisse_vacances') or {}).get(cle)
+    if caisse and not (payload.get('caisse_vacances') or '').strip():
+        pose_bloc('caisse', caisse)
+
+    # --- Point 6 : SEPPT — la gestionnaire tape « Mensura », on retrouve son adresse
+    # dans la liste des services agréés du SPF Emploi.
+    saisi = (payload.get('seppt') or '').lower()
+    if saisi:
+        s = next((x for x in nommees.get('seppt', []) if x['cle'] in saisi), None)
+        if s:
+            # on garde le nom TEL QUE SAISI (« Mensura ») : c'est celui que la
+            # gestionnaire et le client reconnaissent, pas « MENSURA SEPP asbl ».
+            pose_bloc('seppt', s[cle], nom=payload['seppt'].strip())
 
     # --- Point 4 : Fonds de sécurité d'existence ou Fonds social
     fonds = next((_fonds_principal(c, lang) for c in cps if _fonds_principal(c, lang)), None)
@@ -373,11 +399,12 @@ def _valeurs(payload, identity, repertoire=None):
         'No_affiliation_instit_Em_v1': BLANK,
         'Commission_paritaire_Em': ou(cpnum),
         'Commission_paritaire_Em_v1': BLANK,
-        # --- ONSS : adresse officielle (constante) ---
-        'Rue_institution_Inst': 'Place Victor Horta',
+        # --- ONSS/RSZ : adresse officielle, dans la langue du règlement (la rue se
+        # traduit : « Place Victor Horta » <-> « Victor Hortaplein ») ---
+        'Rue_institution_Inst': 'Victor Hortaplein' if lang == 'NL' else 'Place Victor Horta',
         'No_de_la_maison_inst_Inst': '11',
         'Code_postal_Institutions': '1060',
-        'Localité_institution_Inst': 'Bruxelles',
+        'Localité_institution_Inst': 'Brussel' if lang == 'NL' else 'Bruxelles',
         # (les noms d'institutions sont posés plus bas : leurs jetons dépendent de la
         #  langue du modèle — cf. INST_TOKENS_FR / INST_TOKENS_NL)
         # --- Annexe 4 (bien-être) + Annexe 5 (lieux) ---

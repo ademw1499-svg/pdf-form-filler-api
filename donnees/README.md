@@ -7,6 +7,12 @@ dépendre d'une table Supabase que personne n'a remplie.
 |---|---|---|
 | `fse_fr.json` / `fse_nl.json` | point 9 (dénomination officielle de la CP) et point 4 (fonds de sécurité d'existence : nom + adresse) | [Liste des fonds de sécurité d'existence](https://emploi.belgique.be/fr/themes/concertation-sociale/fonds-de-securite-dexistence/liste-des-fonds-de-securite-dexistence) ([NL](https://emploi.belgique.be/nl/themas/sociaal-overleg/fondsen-voor-bestaanszekerheid/lijst-van-de-fondsen-voor-bestaanszekerheid)) |
 | `institutions_controle.json` | article 66 (services de contrôle, par province) | Directions régionales [Contrôle des lois sociales](https://emploi.belgique.be/fr/propos-du-spf/structure-du-spf/inspection-du-travail-dg-controle-des-lois-sociales/directions) et [Contrôle du bien-être au travail](https://emploi.belgique.be/fr/propos-du-spf/structure-du-spf/inspection-du-travail-dg-controle-du-bien-etre-au-travail-7) |
+| `institutions_nommees.json` | point 2 (caisse de vacances : ONVA/RJV, d'office) et point 6 (adresse du SEPPT saisi) | [ONVA](https://www.onva.fgov.be/fr/contact) / [RJV](https://www.rjv.fgov.be/nl/contact) ; [liste des SEPPT agréés](https://emploi.belgique.be/fr/agrements/agrement-services-externes-pour-la-prevention-et-la-protection-au-travail-seppt) (FR+NL) |
+
+Ce qui reste en saisie manuelle dans le règlement (données non embarquées, pas de source
+fiable et automatisable) : point 3 assurance-loi (dépend du contrat de l'employeur),
+point 8 bureau des contributions directes (le SPF Finances n'expose pas de liste par code
+postal, seulement un sélecteur interactif — découpage plus fin que la commune).
 
 ## Régénérer (à refaire si le SPF met ses pages à jour)
 

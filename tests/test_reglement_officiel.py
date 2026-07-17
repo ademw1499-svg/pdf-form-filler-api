@@ -366,6 +366,64 @@ def test_chaque_institution_dans_sa_case(lang, ancre_avant, ancre_apres):
     assert 'ACERTA' not in suite, f'{lang} : la caisse s’imprime dans la case assurance-loi'
 
 
+@pytest.mark.parametrize('lang,nom,rue', [
+    ('FR', 'Office National des Vacances Annuelles', 'Rue Montagne aux Herbes Potagères'),
+    ('NL', 'Rijksdienst voor Jaarlijkse Vakantie', 'Warmoesberg'),
+])
+def test_point2_caisse_vacances_auto(lang, nom, rue):
+    """Point 2 : ONVA (FR) / RJV (NL) rempli d'office, sans saisie."""
+    t = gen(lang, ['124'])
+    ancre = ('Caisse de vacances annuellesDénomination :' if lang == 'FR'
+             else 'Kas voor jaarlijkse vakantieBenaming :')
+    i = t.find(ancre)
+    suite = t[i + len(ancre): i + len(ancre) + 120]
+    assert nom in suite, f'{lang} : nom de la caisse absent -> {suite[:60]!r}'
+    assert rue in suite, f'{lang} : adresse de la caisse absente'
+
+
+def test_caisse_saisie_reste_prioritaire():
+    """Un nom saisi au formulaire l'emporte sur l'ONVA par défaut."""
+    t = gen('FR', ['124'], caisse_vacances='Ma Caisse SRL')
+    i = t.find('Caisse de vacances annuellesDénomination :')
+    suite = t[i:i + 90]
+    assert 'Ma Caisse SRL' in suite
+    assert 'Office National des Vacances' not in suite
+
+
+@pytest.mark.parametrize('lang,seppt,rue', [
+    ('FR', 'Mensura', 'Avenue du Boulevard'),
+    ('NL', 'Mensura', 'Bolwerklaan'),
+    ('FR', 'Securex', 'Avenue de Tervueren'),
+    ('FR', 'Cesi', 'Avenue Konrad Adenauer'),
+])
+def test_point6_seppt_adresse_auto(lang, seppt, rue):
+    """Point 6 : la gestionnaire tape « Mensura », l'adresse suit — c'était le
+    « j'ai mis mensura et y a rien »."""
+    t = gen(lang, ['124'], seppt=seppt)
+    ancre = ('Protection au travailDénomination :' if lang == 'FR'
+             else 'Bescherming op het werkBenaming :')
+    i = t.find(ancre)
+    suite = t[i + len(ancre): i + len(ancre) + 120]
+    assert seppt in suite, f'{lang} : le nom saisi doit rester ({suite[:50]!r})'
+    assert rue in suite, f'{lang} {seppt} : adresse absente -> {suite[:70]!r}'
+
+
+def test_onss_adresse_dans_la_langue():
+    """L'ONSS était figé en français : « Place Victor Horta » dans un document NL."""
+    fr = gen('FR', ['124'])
+    nl = gen('NL', ['124'])
+    assert 'Place Victor Horta 11 1060 Bruxelles' in fr
+    assert 'Victor Hortaplein 11 1060 Brussel' in nl
+    assert 'Place Victor Horta' not in nl, 'adresse française dans le document NL'
+
+
+def test_cp200_denomination_sans_coquille():
+    """La page FR du SPF écrit « employers » (anglais) : corrigé en « employés »."""
+    assert R._fse_info('200', 'FR')['denomination'] == \
+        'Commission paritaire auxiliaire pour les employés'
+    assert 'employers' not in gen('FR', ['200'])
+
+
 def test_fr_bureau_des_contributions_nest_pas_le_seppt():
     """Le modèle FR réutilise {{Nom_1_institution_Inst}} au point 6 (SEPPT) ET au
     point 8 : sans remplacement positionnel, « Mensura » s'imprimait comme bureau
