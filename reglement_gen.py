@@ -48,13 +48,26 @@ def _fse_info(cp, lang):
     return d.get(_cp_norm(cp)) or {}
 
 
+# Les fonds « 2e pilier » (pension complémentaire sectorielle) ne sont PAS ce que vise
+# le point 4 « Fonds de sécurité d'existence ou Fonds social ». On les écarte par leur
+# NOM et non par leur rang : la page du SPF les liste parfois EN PREMIER (FR 220,
+# 327.01, 329.01, 331 ; NL 118, 220, 329.01), et l'ordre diffère même entre les listes
+# FR et NL d'une même CP — se fier au rang faisait imprimer le fonds de pension, avec
+# son adresse, dans un document légal. Vérifié sur les 128 CP : aucun fonds social
+# n'est écarté à tort (« prépension »/« brugpensioen » n'existent dans aucun nom).
+# « pensio » couvre pension, pensioen et « Pensio+ ».
+RE_FONDS_PENSION = re.compile(r'pensio|pilier|pijler', re.I)
+
+
 def _fonds_principal(cp, lang):
-    """Le fonds à citer au point 4 : le premier fonds ADRESSABLE de la liste, c.-à-d.
-    le Fonds social / de sécurité d'existence — et non les fonds « 2e pilier » (pension
-    complémentaire), qui suivent et ne sont pas ce que vise le point 4.
-    None si la CP n'a pas de fonds ou si elle est trop imprécise pour trancher
-    (ex. CP 140 nue : chaque sous-secteur 140.01…140.09 a SON fonds)."""
-    return next((f for f in _fse_info(cp, lang).get('fonds', []) if f.get('adresse')), None)
+    """Le fonds à citer au point 4 : le premier fonds ADRESSABLE qui ne soit pas un
+    fonds de pension « 2e pilier ».
+    None si la CP n'a aucun fonds social — cas réel des SCP 102.01 et 102.09, dont le
+    SPF ne liste qu'un fonds 2e pilier : mieux vaut un blanc à compléter qu'un fonds
+    faux. None aussi si la CP est trop imprécise pour trancher (ex. CP 140 nue :
+    chaque sous-secteur 140.01…140.09 a SON fonds)."""
+    fonds = [f for f in _fse_info(cp, lang).get('fonds', []) if f.get('adresse')]
+    return next((f for f in fonds if not RE_FONDS_PENSION.search(f.get('nom') or '')), None)
 
 
 def _decoupe_adresse_plate(adr):
@@ -403,9 +416,13 @@ def _valeurs(payload, identity, repertoire=None):
             v[TOKS[typ]['nom']] = str(val).strip()
     # 2) données officielles embarquées (fonds de la CP, services de contrôle)
     v.update({k: val for k, val in _valeurs_officielles(payload, identity, lang, cps).items() if val})
-    # 3) puis le répertoire : ce que la gestionnaire a saisi elle-même fait foi
-    v.update({k: val for k, val in
-              _valeurs_institutions(payload, identity, repertoire, lang).items() if val})
+    # 3) puis le répertoire : ce que la gestionnaire a saisi elle-même fait foi.
+    #    Le bloc d'une institution est repris EN ENTIER — un champ vide devient un blanc
+    #    à compléter, il ne laisse PAS passer la valeur officielle. Sinon un fonds saisi
+    #    sans adresse donnait un hybride : le nom saisi + l'adresse officielle d'un AUTRE
+    #    organisme, ce qui est pire que l'un ou l'autre dans un document légal.
+    v.update({k: (val or BLANK) for k, val in
+              _valeurs_institutions(payload, identity, repertoire, lang).items()})
     # Tout jeton non couvert -> BLANK (renseigné dynamiquement au remplissage)
     return v
 
@@ -937,7 +954,7 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
         ('Néant' if lang != 'NL' else 'Geen') if nb_cam in ('0', '') else BLANK)
     _remplir_cameras(doc, nb_cam, lieux_cam, lang)
     # FR + NL : remplit les placeholders littéraux résiduels (Nom, No ONSS, annexe 5 NL)
-    _remplir_placeholders_litteraux(doc, _valeurs(payload, identity, repertoire))
+    _remplir_placeholders_litteraux(doc, valeurs)
     # Cadre horaire (loi 1/6/2026) : ajoute le max hebdomadaire (50h) après le max journalier
     _ajouter_max_hebdo(doc, lang)
     # Article 4 : le renvoi doit viser l'annexe 11 (accusé de réception), pas la 10

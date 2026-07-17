@@ -79,6 +79,62 @@ def test_fonds_principal_est_le_fonds_social_pas_le_2e_pilier():
     assert f['adresse'] and re.search(r'\d{4}', f['adresse'])
 
 
+# Les CP où la page du SPF liste le fonds de pension AVANT le fonds social. Se fier au
+# rang (« le 1er fonds adressable ») imprimait donc le fonds de pension au point 4.
+# Ne PAS réduire cette liste à un seul cas : la CP 112, seule testée au départ, est
+# ordonnée favorablement par hasard — d'où une suite verte sur un code faux.
+@pytest.mark.parametrize('cp,lang,attendu', [
+    ('220', 'FR', "Fonds social et de garantie des employés de l'industrie alimentaire"),
+    ('327.01', 'FR', "Fonds de sécurité d'existence des ateliers sociaux"),
+    ('329.01', 'FR', 'Fonds social pour le secteur socio-culturel de la Communauté flamande'),
+    ('118', 'NL', 'Waarborg- en Sociaal Fonds voor de voedingsnijverheid'),
+    ('220', 'NL', 'Waarborg- en Sociaal Fonds voor de bedienden uit de voedingsnijverheid'),
+    ('329.01', 'NL', 'Sociaal Fonds voor het Sociaal-Cultureel Werk van de Vlaamse Gemeenschap'),
+])
+def test_fonds_pension_liste_en_premier_est_ecarte(cp, lang, attendu):
+    f = R._fonds_principal(cp, lang)
+    assert f, f'{lang} CP {cp} : aucun fonds'
+    assert f['nom'].startswith(attendu), f'{lang} CP {cp} -> {f["nom"]!r}'
+    assert not R.RE_FONDS_PENSION.search(f['nom'])
+
+
+@pytest.mark.parametrize('cp', ['102.01', '102.09'])
+@pytest.mark.parametrize('lang', ['FR', 'NL'])
+def test_cp_sans_fonds_social_reste_blanche(cp, lang):
+    """Le SPF ne liste qu'un fonds « 2e pilier » pour ces sous-commissions : mieux vaut
+    un blanc à compléter que le fonds de pension au point 4."""
+    assert R._fonds_principal(cp, lang) is None
+
+
+def test_aucune_cp_nimprime_un_fonds_de_pension():
+    """Balayage des 128 CP dans les 2 langues : le point 4 ne doit JAMAIS citer un
+    fonds de pension complémentaire."""
+    fautes = []
+    for lang in ('FR', 'NL'):
+        for cp in R._donnees('fse_fr' if lang == 'FR' else 'fse_nl'):
+            f = R._fonds_principal(cp, lang)
+            if f and R.RE_FONDS_PENSION.search(f['nom']):
+                fautes.append(f'{lang} {cp} -> {f["nom"]}')
+    assert not fautes, fautes
+
+
+def test_fr_et_nl_citent_le_meme_fonds():
+    """Les listes FR et NL du SPF ne sont pas ordonnées pareil : la même CP donnait un
+    fonds différent (et une adresse différente) selon la langue du règlement."""
+    ecarts = []
+    for cp in R._donnees('fse_fr'):
+        a, b = R._fonds_principal(cp, 'FR'), R._fonds_principal(cp, 'NL')
+        if bool(a) != bool(b):
+            ecarts.append(f'{cp} : FR={bool(a)} NL={bool(b)}')
+        elif a and b:
+            # le nom est traduit, mais le code postal doit désigner le même organisme
+            cpa, cpb = re.search(r'\b\d{4}\b', a['adresse']), re.search(r'\b\d{4}\b', b['adresse'])
+            if cpa and cpb and cpa.group() != cpb.group():
+                ecarts.append(f'{cp} : FR={a["nom"][:40]} ({cpa.group()}) / '
+                              f'NL={b["nom"][:40]} ({cpb.group()})')
+    assert not ecarts, ecarts
+
+
 def test_fonds_cp_107_conforme_a_la_source():
     """Contrôle bout en bout sur l'exemple de la liste officielle."""
     f = R._fonds_principal('107', 'FR')
@@ -206,6 +262,50 @@ def test_article66_selon_la_province(lang):
     assert m and 'Voorstraat 43 bus 03 02 3500 Hasselt' in m.group(1), f'{lang} lois : {m and m.group(1)}'
     m = re.search(re.escape(ancre_be) + r'\s*(.{0,44})', t)
     assert m and 'Philipssite 3A - bus 8 3001 Leuven' in m.group(1), f'{lang} bien-être : {m and m.group(1)}'
+
+
+def test_article66_fr_et_nl_prennent_bien_LEUR_adresse():
+    """Bruxelles est la seule province où les 2 langues donnent des libellés différents
+    (« Rue Ernest Blerot » / « Ernest Blerotstraat »). Sans ce cas, le paramétrage
+    FR/NL des autres tests ne prouve rien : leurs données FR et NL sont identiques,
+    donc la mutation `cle = 'fr'` passait inaperçue."""
+    ident = dict(IDENT, adresse_siege_social_2='1070 Bruxelles')
+    payload = {'num_entreprise': '0754615359', 'regimes': [{'cp': '112'}]}
+    fr = _texte(R.build_reglement(dict(payload, reglement_langue='FR'), ident, _tpl('FR')))
+    nl = _texte(R.build_reglement(dict(payload, reglement_langue='NL'), ident, _tpl('NL')))
+    m = re.search(r'Contrôle des lois sociales\s*:\s*(.{0,40})', fr)
+    assert m and 'Rue Ernest Blerot' in m.group(1), f'FR -> {m and m.group(1)!r}'
+    m = re.search(r'Inspectie van de sociale wetten\s*:\s*(.{0,40})', nl)
+    assert m and 'Ernest Blerotstraat' in m.group(1), f'NL -> {m and m.group(1)!r}'
+    assert 'Ernest Blerotstraat' not in fr, 'le FR a pris l’adresse néerlandaise'
+    assert 'Rue Ernest Blerot' not in nl, 'le NL a pris l’adresse française'
+
+
+def test_le_repertoire_est_prioritaire_sur_les_donnees_officielles():
+    """Exigence : « le répertoire Supabase, s'il est rempli, reste PRIORITAIRE »."""
+    repertoire = [{'type': 'controle_lois', 'province': 'Brabant flamand',
+                   'nom': 'CLS test', 'rue': 'Rue Saisie', 'numero': '99',
+                   'code_postal': '9999', 'localite': 'VILLE SAISIE'}]
+    t = _texte(R.build_reglement(
+        {'reglement_langue': 'FR', 'num_entreprise': '0754615359',
+         'regimes': [{'cp': '112'}]}, IDENT, _tpl('FR'), repertoire=repertoire))
+    m = re.search(r'Contrôle des lois sociales\s*:\s*(.{0,44})', t)
+    assert m and 'Rue Saisie 99 9999 VILLE SAISIE' in m.group(1), f'-> {m and m.group(1)!r}'
+    assert 'Voorstraat' not in t, "l'adresse officielle a écrasé la saisie"
+
+
+def test_repertoire_sans_adresse_ne_produit_pas_un_hybride():
+    """Un fonds saisi sans adresse ne doit PAS hériter de l'adresse officielle d'un
+    autre organisme : nom de A + adresse de B est pire que l'un ou l'autre."""
+    repertoire = [{'type': 'fonds', 'nom': 'Fonds saisi à la main'}]
+    t = _texte(R.build_reglement(
+        {'reglement_langue': 'FR', 'num_entreprise': '0754615359',
+         'regimes': [{'cp': '112'}]}, IDENT, _tpl('FR'), repertoire=repertoire))
+    ancre = 'Fonds de sécurité d’existence ou Fonds socialDénomination :'
+    i = t.index(ancre)
+    bloc = t[i + len(ancre): i + len(ancre) + 120]
+    assert bloc.lstrip().startswith('Fonds saisi à la main'), bloc[:60]
+    assert 'NEDER-OVER-HEEMBEEK' not in bloc, f'adresse officielle conservée : {bloc[:90]!r}'
 
 
 def test_article66_change_avec_la_province():

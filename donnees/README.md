@@ -19,6 +19,7 @@ curl -sL -A Mozilla/5.0 "https://emploi.belgique.be/fr/themes/concertation-socia
 curl -sL -A Mozilla/5.0 "https://emploi.belgique.be/nl/themas/sociaal-overleg/fondsen-voor-bestaanszekerheid/lijst-van-de-fondsen-voor-bestaanszekerheid" -o fse_nl.html
 python3 $REPO/donnees/parse_fse.py fse.html    $REPO/donnees/fse_fr.json
 python3 $REPO/donnees/parse_fse.py fse_nl.html $REPO/donnees/fse_nl.json
+python3 $REPO/donnees/reconcilier_fse.py       $REPO/donnees/fse_nl.json   # erreurs connues de la page NL
 
 # 2) Services de contrôle : 8 directions par service, + leur version NL via <link hreflang>
 for i in 0 1 2 3 4 5 6 7; do curl -sL -A Mozilla/5.0 "$B/inspection-du-travail-dg-controle-des-lois-sociales/directions-$i" -o cls_$i.html; done
@@ -46,6 +47,19 @@ python3 -m pytest $REPO/tests/test_reglement_officiel.py -q
 - **Plusieurs fonds par CP** (52 cas) : le point 4 prend le **premier fonds adressable**,
   c.-à-d. le Fonds social / de sécurité d'existence — pas les fonds « 2e pilier » (pension).
 - **Page sans titre « Adresse »** : bien-être Liège met l'adresse juste après le ressort.
+- **Fonds « 2e pilier » listés EN PREMIER** : la page ne trie pas les fonds. Pour FR 220 /
+  327.01 / 329.01 / 331 et NL 118 / 220 / 329.01, le fonds de pension complémentaire est en
+  tête — prendre « le premier fonds » imprimait donc le fonds de pension au point 4, et la
+  même CP donnait un fonds différent en FR et en NL. `_fonds_principal` les écarte par leur
+  NOM (`RE_FONDS_PENSION`), jamais par leur rang. Les SCP 102.01 et 102.09 n'ont QUE ce
+  fonds-là : elles restent volontairement en blanc.
+- **Erreurs isolées de la page NL** (`reconcilier_fse.py`, table explicite) : CP 304 situe le
+  Square Sainctelette à « 4020 LUIK » alors que 36 entrées FR et 35 NL le situent à 1000
+  Bruxelles ; CP 152.01/225.01 mettent l'Anspachlaan 111 en 1040 au lieu de 1000. **Ne pas
+  remplacer cette table par un appariement automatique FR/NL** : essayé, les numéros de voirie
+  ne discriminent pas (« Marlylaan 15 bus 8 » s'apparie à « Stuiversstraat 8 », et deux
+  immeubles partagent « 15/8 » dans une même CP) — chaque tentative créait de NOUVELLES
+  adresses fausses.
 - **Page NL périmée** : le Contrôle des lois sociales de Liège a déménagé le 15/01/2024 ;
   la page NL affiche encore Rue Natalis 49 (4020) avec un simple avis, la FR donne la
   bonne (Rue de Fragnée 2 boîte 205, 4000). `build_institutions.py` **rejette** la
