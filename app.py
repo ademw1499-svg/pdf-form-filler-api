@@ -24,8 +24,8 @@ TEMPLATES = {
     'dispense': 'Dispense_partielle_de_versement_du_precompte_professionnel.pdf',
     'mensura': 'FOR140106_FR.pdf',
     'procuration': 'PROCURATION.pdf',
-    'offre_fr': 'Offre_de_collaboration_FR_2025-2026.pdf',
-    'offre_nl': 'Offre_de_collaboration_NL_2025-2026.pdf',
+    'offre_fr': 'Offre_de_collaboration_FR_2026-2027.pdf',
+    'offre_nl': 'Offre_de_collaboration_NL_2026-2027.pdf',
     'att_accident_nl': 'Attestation_accident_travail_NL.pdf',
     'att_seppt_nl': 'Attestation_SEPPT_NL.pdf',
 }
@@ -1632,88 +1632,121 @@ def merge_selective(tpl_path, overlays):
     """
     Merge overlays only onto specific pages.
     overlays: dict {page_index: pdf_bytes}
-    Notre texte est mis PAR-DESSUS le template (ov_page.merge_page(pg)).
+    Notre texte est dessiné PAR-DESSUS le template : pg.merge_page(ov) empile
+    l'overlay sur la page. (L'inverse masquerait le texte dès que le template a un
+    fond blanc opaque — ce qui est le cas des PDF exportés depuis Pages/Word.)
     Les pages sans overlay passent intactes.
     """
-    rd = PdfReader(tpl_path)
+    # On clone D'ABORD tout le document dans le writer, PUIS on fusionne sur SES pages.
+    # (Muter les pages du reader dans une boucle ne fusionnait que la 1re page et
+    #  laissait les suivantes vides — piège pypdf.)
     wr = PdfWriter()
-    for i in range(len(rd.pages)):
-        pg = rd.pages[i]
-        if i in overlays:
-            ov = PdfReader(io.BytesIO(overlays[i]))
-            ov_page = ov.pages[0]
-            ov_page.merge_page(pg)  # template DERRIERE notre texte
-            wr.add_page(ov_page)
-        else:
-            wr.add_page(pg)
+    wr.append(tpl_path)
+    for i, ov_bytes in overlays.items():
+        if 0 <= i < len(wr.pages):
+            ov = PdfReader(io.BytesIO(ov_bytes))
+            wr.pages[i].merge_page(ov.pages[0])  # notre texte AU-DESSUS du template
     out = io.BytesIO()
     wr.write(out)
     out.seek(0)
     return out
 
+# --- Offre de collaboration 2026-2027 : position des champs, PAR LANGUE ---------
+# Espace virtuel 707x1000, origine haut-gauche (cf. cvt()). Les 2 documents n'ont
+# NI le même nombre de pages (FR 20 / NL 21) NI les mêmes x -> une table chacun.
+# Pour une future édition du document : réextraire les positions des « ……… » et
+# mettre à jour ces tables (le reste du code ne bouge pas).
+OFFRE_LAYOUT = {
+    'fr': {
+        'pages': {'cover': 0, 'cond': 11, 'proc': 12, 'mandat': 13},
+        'cover': {'societe': (168, 460), 'adr1': (168, 486), 'adr2': (168, 512),
+                  'tva': (168, 538), 'repr': (168, 564)},
+        'cond': {'societe': (168, 228), 'adr1': (168, 244), 'adr2': (168, 261),
+                 'tva': (168, 277), 'repr': (168, 294),
+                 'jour': (320, 581), 'mois': (360, 581), 'annee': (402, 581),
+                 'fait': (119, 633)},
+        'proc': {'soussigne': (210, 190), 'niss': (210, 206), 'dom1': (210, 221),
+                 'dom2': (210, 236), 'qualite': (210, 252), 'societe': (210, 267),
+                 'adr1': (210, 283), 'adr2': (210, 298), 'tva': (210, 314), 'date': (179, 786)},
+        'mandat': {'soussigne': (210, 191), 'niss': (210, 207), 'dom1': (210, 222),
+                   'dom2': (210, 238), 'qualite': (210, 253), 'societe': (210, 269),
+                   'adr1': (210, 284), 'adr2': (210, 299), 'tva': (210, 315), 'date': (179, 768)},
+    },
+    'nl': {
+        'pages': {'cover': 0, 'cond': 12, 'proc': 13, 'mandat': 14},
+        'cover': {'societe': (252, 460), 'adr1': (252, 486), 'adr2': (252, 512),
+                  'tva': (252, 538), 'repr': (252, 564)},
+        'cond': {'societe': (252, 228), 'adr1': (252, 244), 'adr2': (252, 261),
+                 'tva': (252, 277), 'repr': (252, 294),
+                 'jour': (323, 581), 'mois': (363, 581), 'annee': (405, 581),
+                 'fait': (168, 633)},
+        'proc': {'soussigne': (210, 190), 'niss': (210, 206), 'dom1': (210, 221),
+                 'dom2': (210, 236), 'qualite': (210, 252), 'societe': (210, 267),
+                 'adr1': (210, 283), 'adr2': (210, 298), 'tva': (168, 314), 'date': (223, 786)},
+        'mandat': {'soussigne': (210, 191), 'niss': (210, 207), 'dom1': (210, 222),
+                   'dom2': (210, 238), 'qualite': (210, 253), 'societe': (210, 269),
+                   'adr1': (210, 284), 'adr2': (210, 299), 'tva': (168, 315), 'date': (223, 785)},
+    },
+}
+
+
 def fill_offre_pdf(d, lang='fr'):
-    """
-    Offre de collaboration — 20 pages.
-    Only pages 1, 13, 14, 15 have fillable fields.
-    Pages 2-12 and 16-20 are static — we preserve them untouched.
-    """
+    """Offre de collaboration 2026-2027 (FR 20 pages / NL 21 pages).
+    Remplit la couverture, les conditions particulières, la procuration et le contrat
+    de mandat ; toutes les autres pages sont statiques et préservées telles quelles."""
+    lang = 'nl' if str(lang).lower().startswith('nl') else 'fr'
     tpl = TEMPLATES['offre_nl'] if lang == 'nl' else TEMPLATES['offre_fr']
+    L = OFFRE_LAYOUT[lang]
 
     def val(primary, fallback):
         return d.get(primary) or d.get(fallback)
 
-    overlays = {}
+    def tva():
+        return d.get('num_tva') or d.get('num_entreprise')
 
-    # --- Page 1 (index 0): Cover — company info ---
-    def draw_p1(c):
-        if d.get('nom_societe'): txt(c, d['nom_societe'], 223, 470)
-        if val('adresse_1','adresse_siege_social_1'): txt(c, val('adresse_1','adresse_siege_social_1'), 218, 496)
-        if val('adresse_2','adresse_siege_social_2'): txt(c, val('adresse_2','adresse_siege_social_2'), 217, 526)
-        if d.get('num_tva') or d.get('num_entreprise'): txt(c, d.get('num_tva') or d.get('num_entreprise'), 217, 551)
-        if val('represente_par','nom_prenom_gerant'): txt(c, val('represente_par','nom_prenom_gerant'), 217, 577)
-    overlays[0] = make_overlay(draw_p1)
+    # Les coordonnées ci-dessus sont celles du bas des « ……… ». On remonte la ligne
+    # de base de 7 pour que le texte se pose SUR la ligne pointillée au lieu d'être
+    # barré par les points.
+    BASELINE_ADJ = 7
 
-    # --- Page 13 (index 12): Conditions particulières ---
-    def draw_p13(c):
-        if d.get('nom_societe'): txt(c, d['nom_societe'], 210, 222)
-        if val('adresse_1','adresse_siege_social_1'): txt(c, val('adresse_1','adresse_siege_social_1'), 207, 238)
-        if val('adresse_2','adresse_siege_social_2'): txt(c, val('adresse_2','adresse_siege_social_2'), 202, 258)
-        if d.get('num_tva') or d.get('num_entreprise'): txt(c, d.get('num_tva') or d.get('num_entreprise'), 202, 273)
-        if val('represente_par','nom_prenom_gerant'): txt(c, val('represente_par','nom_prenom_gerant'), 199, 291)
-        if d.get('date_entree_jour'): txt(c, d['date_entree_jour'], 328, 585)
-        if d.get('date_entree_mois'): txt(c, d['date_entree_mois'], 370, 585)
-        if d.get('date_entree_annee'): txt(c, d['date_entree_annee'], 423, 587)
-        if val('date_fait','date_signature'): txt(c, val('date_fait','date_signature'), 189, 640)
-    overlays[12] = make_overlay(draw_p13)
+    def pose(c, coords, champ, valeur):
+        if valeur and champ in coords:
+            x, y = coords[champ]
+            txt(c, valeur, x, y - BASELINE_ADJ)
 
-    # --- Page 14 (index 13): Procuration ---
-    def draw_p14(c):
-        if val('nom_soussigne','nom_prenom_gerant'): txt(c, val('nom_soussigne','nom_prenom_gerant'), 257, 183)
-        if val('niss','niss_gerant'): txt(c, val('niss','niss_gerant'), 255, 200)
-        if val('domicile_1','adresse_siege_social_1'): txt(c, val('domicile_1','adresse_siege_social_1'), 255, 214)
-        if val('domicile_2','adresse_siege_social_2'): txt(c, val('domicile_2','adresse_siege_social_2'), 255, 228)
-        if d.get('qualite'): txt(c, d['qualite'], 256, 246)
-        if val('societe','nom_societe'): txt(c, val('societe','nom_societe'), 253, 263)
-        if val('adresse_1','adresse_siege_social_1'): txt(c, val('adresse_1','adresse_siege_social_1'), 252, 280)
-        if val('adresse_2','adresse_siege_social_2'): txt(c, val('adresse_2','adresse_siege_social_2'), 252, 295)
-        if d.get('num_tva') or d.get('num_entreprise'): txt(c, d.get('num_tva') or d.get('num_entreprise'), 251, 311)
-        if d.get('date_signature'): txt(c, d['date_signature'], 205, 801)
-    overlays[13] = make_overlay(draw_p14)
+    def bloc_societe(c, p):
+        pose(c, p, 'societe', d.get('nom_societe'))
+        pose(c, p, 'adr1', val('adresse_1', 'adresse_siege_social_1'))
+        pose(c, p, 'adr2', val('adresse_2', 'adresse_siege_social_2'))
+        pose(c, p, 'tva', tva())
+        pose(c, p, 'repr', val('represente_par', 'nom_prenom_gerant'))
 
-    # --- Page 15 (index 14): Contrat de mandat ---
-    def draw_p15(c):
-        if val('nom_soussigne','nom_prenom_gerant'): txt(c, val('nom_soussigne','nom_prenom_gerant'), 246, 185)
-        if val('niss','niss_gerant'): txt(c, val('niss','niss_gerant'), 245, 200)
-        if val('domicile_1','adresse_siege_social_1'): txt(c, val('domicile_1','adresse_siege_social_1'), 246, 216)
-        if val('domicile_2','adresse_siege_social_2'): txt(c, val('domicile_2','adresse_siege_social_2'), 245, 234)
-        if d.get('qualite'): txt(c, d['qualite'], 244, 249)
-        if val('societe','nom_societe'): txt(c, val('societe','nom_societe'), 244, 265)
-        if val('adresse_1','adresse_siege_social_1'): txt(c, val('adresse_1','adresse_siege_social_1'), 244, 282)
-        if val('adresse_2','adresse_siege_social_2'): txt(c, val('adresse_2','adresse_siege_social_2'), 243, 297)
-        if d.get('num_tva') or d.get('num_entreprise'): txt(c, d.get('num_tva') or d.get('num_entreprise'), 243, 312)
-        if d.get('date_signature'): txt(c, d['date_signature'], 203, 782)
-    overlays[14] = make_overlay(draw_p15)
+    def bloc_mandataire(c, p):
+        pose(c, p, 'soussigne', val('nom_soussigne', 'nom_prenom_gerant'))
+        pose(c, p, 'niss', val('niss', 'niss_gerant'))
+        pose(c, p, 'dom1', val('domicile_1', 'adresse_siege_social_1'))
+        pose(c, p, 'dom2', val('domicile_2', 'adresse_siege_social_2'))
+        pose(c, p, 'qualite', d.get('qualite'))
+        pose(c, p, 'societe', val('societe', 'nom_societe'))
+        pose(c, p, 'adr1', val('adresse_1', 'adresse_siege_social_1'))
+        pose(c, p, 'adr2', val('adresse_2', 'adresse_siege_social_2'))
+        pose(c, p, 'tva', tva())
+        pose(c, p, 'date', val('date_signature', 'date_fait'))
 
+    def draw_cond(c):
+        p = L['cond']
+        bloc_societe(c, p)
+        pose(c, p, 'jour', d.get('date_entree_jour'))
+        pose(c, p, 'mois', d.get('date_entree_mois'))
+        pose(c, p, 'annee', d.get('date_entree_annee'))
+        pose(c, p, 'fait', val('date_fait', 'date_signature'))
+
+    overlays = {
+        L['pages']['cover']: make_overlay(lambda c: bloc_societe(c, L['cover'])),
+        L['pages']['cond']: make_overlay(draw_cond),
+        L['pages']['proc']: make_overlay(lambda c: bloc_mandataire(c, L['proc'])),
+        L['pages']['mandat']: make_overlay(lambda c: bloc_mandataire(c, L['mandat'])),
+    }
     return merge_selective(tpl, overlays).getvalue()
 
 def fill_procuration_pdf(d):
