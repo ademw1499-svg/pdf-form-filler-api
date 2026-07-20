@@ -237,8 +237,10 @@ def list_employeurs():
         base = f"{SUPABASE_URL}/rest/v1/employeurs?order=updated_at.desc&limit=500"
         # colonnes §10 (statut/manquants/…) : si elles n'existent pas encore en base,
         # PostgREST renvoie 400 -> on retombe sur les colonnes de base (ne casse rien).
+        # `data` est inclus pour que le portail calcule LUI-MÊME ce qui manque à un
+        # règlement (sans dépendre du robot Prisma qui écrit `manquants`).
         r = requests.get(base + "&select=num_entreprise,nom_societe,email,statut,"
-                         "numero_employeur,manquants,message,updated_at",
+                         "numero_employeur,manquants,message,data,updated_at",
                          headers=_supabase_headers(), timeout=10)
         if r.status_code >= 300:
             r = requests.get(base + "&select=num_entreprise,nom_societe,email,updated_at",
