@@ -167,6 +167,38 @@ class TestRegimes:
         items = R._regimes_du_payload(payload, CP_REP)
         assert items[0]['cible'] == 2280   # 38h par défaut
 
+    def test_provenance_du_temps_plein_est_tracee(self):
+        """saisie > répertoire > défaut — la provenance sert à AVERTIR quand le 38h
+        n'est qu'une supposition (mécanisme exact du bug 112/121)."""
+        def prov(rg, rep=None):
+            p = {'regimes': [dict(rg, ouverture_debut='09:00', ouverture_fin='17:00',
+                                  jour_debut=0, jour_fin=4)]}
+            return R._regimes_du_payload(p, rep)[0]['cible_source']
+        assert prov({'cp': '112', 'hebdo': '36h30'}, CP_REP) == 'saisie'
+        assert prov({'cp': '112'}, CP_REP) == 'repertoire'
+        assert prov({'cp': '999'}, CP_REP) == 'defaut'
+        assert prov({'cp': ''}) == 'defaut'
+
+    @pytest.mark.parametrize('lang,attendu', [
+        ('FR', 'appliqué par défaut'), ('NL', 'standaard 38u/week toegepast'),
+    ])
+    def test_doc_horaires_avertit_si_38h_par_defaut(self, lang, attendu):
+        """CP inconnue -> le document d'horaires porte l'avertissement en tête de
+        section. CP connue -> aucun avertissement."""
+        def doc_txt(cp, rep):
+            p = {'reglement_langue': lang, 'regimes': [
+                {'cp': cp, 'ouverture_debut': '08:00', 'ouverture_fin': '18:00',
+                 'jour_debut': 0, 'jour_fin': 4}]}
+            b = R.generer_doc_horaires(p, {'nom_societe': 'TEST'}, cp_repertoire=rep)
+            assert b, 'aucun horaire généré'
+            x = zipfile.ZipFile(io.BytesIO(b)).read('word/document.xml').decode('utf-8')
+            return unescape(re.sub(r'<[^>]+>', '', x))
+        inconnu = doc_txt('999', CP_REP)
+        assert attendu in inconnu, f'avertissement absent ({lang})'
+        assert 'CP 999' in inconnu
+        connu = doc_txt('112', CP_REP)
+        assert attendu not in connu, f'avertissement à tort sur une CP connue ({lang})'
+
     def test_sans_ouverture_ignore(self):
         payload = {'regimes': [{'cp': '112', 'hebdo': '38'}]}  # pas d'ouverture
         assert R._regimes_du_payload(payload) == []

@@ -731,7 +731,7 @@ def _bordures(tbl):
     tblPr.append(borders)
 
 
-def _ajouter_annexe_horaires(doc, schedules, langue='FR', titre_section=None):
+def _ajouter_annexe_horaires(doc, schedules, langue='FR', titre_section=None, note=None):
     from docx.shared import Pt, RGBColor
     noms = JOURS_NL if langue == 'NL' else JOURS_FR
     ACCENT = RGBColor(0x1c, 0x22, 0x44)
@@ -741,6 +741,11 @@ def _ajouter_annexe_horaires(doc, schedules, langue='FR', titre_section=None):
                                else 'BIJLAGE — MOGELIJKE UURROOSTERS')
     r = h.add_run(entete)
     r.bold = True; r.font.size = Pt(14); r.font.color.rgb = ACCENT
+    if note:
+        # Avertissement en tête de section (ambre) — ex. temps plein appliqué par défaut.
+        pn = doc.add_paragraph()
+        rn = pn.add_run('⚠ ' + note)
+        rn.bold = True; rn.font.size = Pt(10); rn.font.color.rgb = RGBColor(0xb4, 0x53, 0x09)
     intro = doc.add_paragraph()
     ri = intro.add_run(
         "Horaires-types compatibles avec les heures d'ouverture. "
@@ -1063,8 +1068,17 @@ def _regimes_du_payload(payload, cp_repertoire=None):
         return (_min(f"{v}:00") if str(v or '').isdigit() else 480) or 480
 
     def _cible(cp, hebdo):
-        h = hebdo if str(hebdo or '').strip() else _cp_info(lut, cp).get('hebdo')
-        return _hebdo_min(h, 2280)
+        """(minutes, provenance). La provenance est gardée dans l'item pour que le
+        document AVERTISSE quand le temps plein est un simple défaut : un « 38h »
+        silencieux sur une CP inconnue est indiscernable d'un vrai 38h — c'est
+        exactement le mécanisme du bug 112/121 (36h30 imprimé 38h sans alerte)."""
+        saisi = str(hebdo or '').strip()
+        if saisi:
+            return _hebdo_min(saisi, 2280), 'saisie'
+        rep = _cp_info(lut, cp).get('hebdo')
+        if str(rep or '').strip():
+            return _hebdo_min(rep, 2280), 'repertoire'
+        return 2280, 'defaut'
 
     def _lib(cp, label):
         return (label or '').strip() or _cp_info(lut, cp).get('denom', '')
@@ -1080,10 +1094,11 @@ def _regimes_du_payload(payload, cp_repertoire=None):
                 continue
             cp = str(rg.get('cp') or '').strip()
             hebdo = rg.get('hebdo') if rg.get('hebdo') not in (None, '') else rg.get('heures_semaine')
+            cible, prov = _cible(cp, hebdo)
             items.append({
                 'label': _lib(cp, rg.get('label')),
                 'cp': cp,
-                'cible': _cible(cp, hebdo),
+                'cible': cible, 'cible_source': prov,
                 'debut': deb, 'fin': fin,
                 'jd': rg.get('jour_debut', rg.get('ouverture_jour_debut', 0)),
                 'jf': rg.get('jour_fin', rg.get('ouverture_jour_fin', 6)),
@@ -1098,13 +1113,15 @@ def _regimes_du_payload(payload, cp_repertoire=None):
             'jd': payload.get('ouverture_jour_debut', 0), 'jf': payload.get('ouverture_jour_fin', 6),
             'mx': _mxj(payload.get('max_journalier'))}
     cp_o = payload.get('commission_paritaire')
+    cible_o, prov_o = _cible(cp_o, payload.get('heures_ouvrier'))
     items.append({**base, 'label': _lib(cp_o, 'ouvriers'), 'cp': cp_o,
-                  'cible': _cible(cp_o, payload.get('heures_ouvrier'))})
+                  'cible': cible_o, 'cible_source': prov_o})
     cp_e = str(payload.get('cp_employe') or '').strip()
     h_e = payload.get('heures_employe')
     if cp_e or h_e:
+        cible_e, prov_e = _cible(cp_e or cp_o, h_e)
         items.append({**base, 'label': _lib(cp_e or cp_o, 'employés'), 'cp': cp_e or cp_o,
-                      'cible': _cible(cp_e or cp_o, h_e)})
+                      'cible': cible_e, 'cible_source': prov_e})
     return items
 
 
@@ -1171,7 +1188,18 @@ def generer_doc_horaires(payload, identity=None, cp_repertoire=None):
         # On ne garde QUE les horaires qui atteignent réellement le temps plein.
         complets = [s for s in scheds if s.get('complet')]
         if complets:
-            _ajouter_annexe_horaires(doc, complets, lang, titre_section=titre)
+            # Temps plein par DÉFAUT (ni saisi, ni au répertoire CP) : l'écrire en
+            # tête de section. Un « 38h » supposé est indiscernable d'un vrai 38h —
+            # c'est le mécanisme exact du bug 112/121, on ne le laisse plus muet.
+            note = None
+            if it.get('cible_source') == 'defaut':
+                cpl = f"CP {it['cp']}" if it.get('cp') else ('cette section' if lang != 'NL' else 'deze sectie')
+                note = (f"Temps plein introuvable au répertoire pour {cpl} : 38h/semaine "
+                        "appliqué par défaut — à vérifier avant toute utilisation."
+                        if lang != 'NL' else
+                        f"Voltijdse arbeidsduur niet gevonden voor {cpl}: standaard 38u/week "
+                        "toegepast — te controleren vóór gebruik.")
+            _ajouter_annexe_horaires(doc, complets, lang, titre_section=titre, note=note)
             total_tables += len(complets)
         else:
             # Aucun horaire n'atteint le temps plein -> l'ouverture est trop étroite :

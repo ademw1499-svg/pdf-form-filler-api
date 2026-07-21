@@ -462,6 +462,36 @@ def test_point4_deux_cp_meme_fonds_pas_de_doublon():
     assert 'pour les employés :' not in t
 
 
+# Une CP représentante de chaque FAMILLE de piège rencontré (le balayage complet des
+# 128 CP × 2 langues vit dans tests/sweep_complet.py, à lancer avant toute release) :
+#   112 = normale multi-fonds · 329.01 = pension listé en premier (FR) ·
+#   118 = pension en premier côté NL seulement · 102.01 = AUCUN fonds social ·
+#   140.03 = sous-secteur transport · 102.02 = titre partagé entre 2 CP ·
+#   110 = balisée <h3> sur la page SPF · 200 = coquille « employers » corrigée ·
+#   124 = construction (sans siège d'exploitation) · 302 = horeca (fonds « 2e pilier » homonyme)
+FAMILLES_CP = ['112', '329.01', '118', '102.01', '140.03', '102.02', '110', '200', '124', '302']
+
+
+@pytest.mark.parametrize('lang', ['FR', 'NL'])
+def test_invariants_par_famille_de_cp(lang):
+    """Mêmes invariants que le balayage complet, sur un représentant par famille."""
+    data = R._donnees('fse_nl' if lang == 'NL' else 'fse_fr')
+    for cp in FAMILLES_CP:
+        t = gen(lang, [cp])
+        assert not re.search(r'\{\{[A-Za-z]', t), f'{lang} {cp} : jeton survivant'
+        assert not re.search(r'\bNone\b', t), f'{lang} {cp} : None littéral'
+        denom = (data.get(cp) or {}).get('denomination', '')
+        assert denom[:60] in t, f'{lang} {cp} : dénomination absente'
+        i = t.find('Fonds de sécurité' if lang == 'FR' else 'Fondsen voor bestaanszekerheid')
+        zone = t[i:i + 220].split('Adresse')[0].split('Adres')[0]
+        assert not R.RE_FONDS_PENSION.search(zone), f'{lang} {cp} : fonds de pension au point 4'
+        fonds = R._fonds_principal(cp, lang)
+        if fonds:
+            assert fonds['nom'][:45] in t, f'{lang} {cp} : fonds attendu absent'
+        renvoi = '(annexe n° 11)' if lang == 'FR' else 'bijlage nr. 11'
+        assert renvoi in t, f'{lang} {cp} : renvoi annexe 11 absent'
+
+
 def test_fr_bureau_des_contributions_nest_pas_le_seppt():
     """Le modèle FR réutilise {{Nom_1_institution_Inst}} au point 6 (SEPPT) ET au
     point 8 : sans remplacement positionnel, « Mensura » s'imprimait comme bureau
