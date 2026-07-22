@@ -149,6 +149,11 @@ def save_employeur(form_data):
             'nom_societe': form_data.get('nom_societe') or '',
             'email': form_data.get('email') or '',
             'data': form_data,
+            # Le robot PC 06 ne prend QUE les lignes 'pending' : sans statut explicite,
+            # une affiliation neuve restait invisible pour lui (NULL) et l'encodage ne
+            # démarrait jamais. Sur une re-soumission, 'pending' relance la vérification
+            # — le robot ne ré-encode jamais si numero_employeur est déjà rempli.
+            'statut': 'pending',
             'updated_at': datetime.now().isoformat(),
         }
         r = requests.post(
@@ -161,10 +166,24 @@ def save_employeur(form_data):
             },
             json=row, timeout=10,
         )
+        if r.status_code >= 300 and 'statut' in r.text:
+            # Base sans colonne statut : on sauvegarde quand même le dossier (l'encodage
+            # automatique, lui, exige la colonne — SQL du §10).
+            row.pop('statut', None)
+            r = requests.post(
+                f"{SUPABASE_URL}/rest/v1/employeurs?on_conflict=num_entreprise",
+                headers={
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': f'Bearer {SUPABASE_KEY}',
+                    'Content-Type': 'application/json',
+                    'Prefer': 'resolution=merge-duplicates,return=minimal',
+                },
+                json=row, timeout=10,
+            )
         if r.status_code >= 300:
             print(f"[SUPABASE] échec sauvegarde {r.status_code}: {r.text[:200]}")
         else:
-            print(f"[SUPABASE] employeur sauvegardé: {num}")
+            print(f"[SUPABASE] employeur sauvegardé (statut={row.get('statut', '—')}): {num}")
     except Exception as e:
         print(f"[SUPABASE] erreur: {e}")
 
