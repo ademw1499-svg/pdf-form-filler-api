@@ -564,3 +564,19 @@ def test_prisma_absent_ou_malforme_sans_effet():
     for inst in (None, [], [None, 42, {'uc_id': 'ucInconnu', 'nom1': 'X'}]):
         t = _texte(R.build_reglement(dict(base, institutions_prisma=inst), IDENT, _tpl('FR')))
         assert t == ref, f'institutions_prisma={inst!r} a modifié le document'
+
+
+def test_nl_meme_squelette_que_le_document_de_base():
+    """Le modèle NL a 6 styles JUSTIFIÉS là où le FR (document de base) est ALIGNÉ À
+    GAUCHE : dans Word, les lignes coupées d'un paragraphe justifié s'étirent sur
+    toute la largeur (« AUTOMOBILE   MOBILITY   GROUP » constaté le 22/07). Le NL
+    généré doit avoir le même squelette que le FR."""
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    b = R.build_reglement({'reglement_langue': 'NL', 'num_entreprise': '0754615359',
+                           'regimes': [{'cp': '112'}]}, IDENT, _tpl('NL'))
+    doc = Document(io.BytesIO(b))
+    for nom in R.STYLES_A_ALIGNER_NL:
+        st = doc.styles[nom]
+        assert st.paragraph_format.alignment == WD_ALIGN_PARAGRAPH.LEFT, \
+            f'style {nom!r} : {st.paragraph_format.alignment} (attendu LEFT, comme le FR)'

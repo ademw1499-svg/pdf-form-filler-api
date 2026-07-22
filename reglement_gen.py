@@ -923,6 +923,28 @@ def _remplir_placeholders_litteraux(doc, valeurs):
                          valeurs.get('harcelement'))
 
 
+# Le modèle NL a 6 styles JUSTIFIÉS là où le modèle FR (document de base) les a
+# ALIGNÉS À GAUCHE. Résultat : dans Word, les lignes coupées à l'intérieur d'un
+# paragraphe justifié sont étirées sur toute la largeur (« AUTOMOBILE   MOBILITY
+# GROUP ») — constaté sur un vrai document le 22/07/2026 et refusé : le NL doit
+# avoir le MÊME squelette que le document de base, seulement traduit.
+# Relevé par comparaison des deux .docx : Normal, voorblad, ster, normalzonder,
+# article, normal1col -> JUSTIFY en NL, LEFT en FR.
+STYLES_A_ALIGNER_NL = ('Normal', 'voorblad', 'ster', 'normalzonder',
+                       'article', 'normal1col')
+
+
+def _harmoniser_mise_en_page_nl(doc):
+    """Aligne les styles du modèle NL sur le document de base FR (gauche, pas
+    justifié). Ne touche à rien d'autre : mêmes polices, mêmes retraits."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    for nom in STYLES_A_ALIGNER_NL:
+        try:
+            doc.styles[nom].paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        except KeyError:
+            continue
+
+
 def _ajouter_max_hebdo(doc, lang):
     """Ajoute la ligne « Maximum 50 heures par semaine … » juste après la durée
     journalière maximale dans le cadre (Article 10 §2). La loi du 1/6/2026 exige cette
@@ -1016,6 +1038,8 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
     lang = 'NL' if str(payload.get('reglement_langue') or 'FR').upper() == 'NL' else 'FR'
     lut = _cp_lookup(cp_repertoire)
     doc = Document(io.BytesIO(template_bytes))
+    if lang == 'NL':
+        _harmoniser_mise_en_page_nl(doc)
     # Commission paritaire : la MÊME balise sert pour les 2 lignes du modèle
     # (ouvrier + employé) -> remplacement positionnel (1ʳᵉ occ. = 1er régime/CP,
     # 2ᵉ occ. = 2e régime/CP). Si des régimes explicites sont fournis, on les utilise.
