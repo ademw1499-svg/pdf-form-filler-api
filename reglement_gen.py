@@ -450,8 +450,56 @@ def _valeurs(payload, identity, repertoire=None):
     #    organisme, ce qui est pire que l'un ou l'autre dans un document légal.
     v.update({k: (val or BLANK) for k, val in
               _valeurs_institutions(payload, identity, repertoire, lang).items()})
+    # 4) enfin les institutions du DOSSIER PRISMA du client (lues par le robot PC 06,
+    #    colonne employeurs.institutions) : c'est la vérité du dossier encodé — elle
+    #    l'emporte sur le référentiel général ET sur la saisie du formulaire.
+    v.update({k: (val or BLANK) for k, val in
+              _valeurs_prisma(payload.get('institutions_prisma'), lang).items()})
     # Tout jeton non couvert -> BLANK (renseigné dynamiquement au remplissage)
     return v
+
+
+# Prisma (uc_id stable, fourni par le robot PC 06) -> bloc d'institution du règlement.
+# On mappe UNIQUEMENT ce que l'Article 2 imprime ; ONEM, allocations familiales, etc.
+# n'ont pas de case dans le modèle et sont ignorés sans erreur.
+PRISMA_UC = {
+    'ucVakantiekas': 'caisse',              # 2. Caisse de vacances annuelles
+    'ucArbeidsongevallen': 'assurance',     # 3. Assurance-loi accidents du travail
+    'ucArbeidsgeneeskundige': 'seppt',      # 6. Service externe (médecine du travail)
+    'ucControleGeneeskunde': 'controle_bienetre',   # art. 66, contrôle du bien-être
+}
+
+
+def _valeurs_prisma(institutions, lang):
+    """Jetons remplis depuis les institutions du dossier Prisma (liste de dicts du
+    robot PC 06 : type, uc_id, nom1, rue, numero, boite, code_postal, localite,
+    num_affiliation…). {} si rien. Bloc entier par institution : un champ vide chez
+    Prisma devient un blanc, il ne laisse pas passer une autre source (pas d'hybride)."""
+    if not isinstance(institutions, list):
+        return {}
+    toks = _inst_tokens(lang)
+    out = {}
+    for inst in institutions:
+        if not isinstance(inst, dict):
+            continue
+        typ = PRISMA_UC.get(str(inst.get('uc_id') or ''))
+        if not typ or typ not in toks:
+            continue
+        t = toks[typ]
+        no = str(inst.get('numero') or '').strip()
+        boite = str(inst.get('boite') or '').strip()
+        if boite:
+            no = f"{no} {'bus' if lang == 'NL' else 'bte'} {boite}".strip()
+        if t.get('nom'):
+            out[t['nom']] = str(inst.get('nom1') or '').strip()
+        out[t['rue']] = str(inst.get('rue') or '').strip()
+        out[t['no']] = no
+        out[t['cp']] = str(inst.get('code_postal') or '').strip()
+        out[t['loc']] = str(inst.get('localite') or '').strip()
+        # N° d'affiliation propre au client : seul le SEPPT a un jeton dédié.
+        if typ == 'seppt' and str(inst.get('num_affiliation') or '').strip():
+            out['No_affiliation_instit_Em'] = str(inst['num_affiliation']).strip()
+    return out
 
 
 def _remplacer_dans_paragraphe(p, motif, remplacement):

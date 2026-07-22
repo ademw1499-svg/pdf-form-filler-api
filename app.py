@@ -1227,6 +1227,27 @@ def _fetch_reglement_template(langue):
     return _fetch_storage('reglement', f'reglement_{lang}.docx')
 
 
+def _institutions_prisma(num):
+    """Institutions du dossier Prisma du client (colonne employeurs.institutions,
+    écrite par le robot PC 06). Liste de dicts, ou None. Résilient : colonne pas
+    encore créée / employeur inconnu / erreur -> None, le règlement sort comme avant."""
+    if not num or not SUPABASE_URL or not SUPABASE_KEY:
+        return None
+    try:
+        import urllib.parse
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/employeurs"
+            f"?num_entreprise=eq.{urllib.parse.quote(str(num))}&select=institutions&limit=1",
+            headers=_supabase_headers(), timeout=10)
+        if r.status_code >= 300:          # ex. 42703 : colonne pas encore créée
+            return None
+        rows = r.json()
+        inst = rows[0].get('institutions') if rows else None
+        return inst if isinstance(inst, list) and inst else None
+    except Exception:
+        return None
+
+
 @app.route('/reglement/generer', methods=['POST'])
 def reglement_generer():
     """Génère le règlement de travail (.docx) depuis le contrat §6.
@@ -1249,6 +1270,14 @@ def reglement_generer():
     template_bytes = _fetch_reglement_template(payload.get('reglement_langue'))
     if not template_bytes:
         return jsonify({"error": "Le modèle de règlement n'est pas encore hébergé (upload Supabase à faire)."}), 503
+    # Institutions du dossier Prisma (nom/adresse/n° d'affiliation PAR CLIENT, lues
+    # par le robot PC 06). Réservé aux appels AUTHENTIFIÉS : l'endpoint reste public
+    # pour les données publiques (BCE), mais les données du dossier client ne doivent
+    # pas être servies à quiconque poste un numéro d'entreprise.
+    if verify_user_token(request):
+        inst = _institutions_prisma(num)
+        if inst:
+            payload['institutions_prisma'] = inst
     model_bytes = None
     mid = (payload.get('horaire_modele') or '').strip()
     if mid:

@@ -500,3 +500,67 @@ def test_fr_bureau_des_contributions_nest_pas_le_seppt():
     m = re.search(r'Bureau des contributions directesDénomination\s*:\s*(.{0,14})', t)
     assert m and 'Mensura' not in m.group(1), f'point 8 = {m and m.group(1)!r}'
     assert re.search(r'Protection au travailDénomination\s*:\s*Mensura', t), 'SEPPT perdu au point 6'
+
+
+# --- Institutions du dossier Prisma (colonne employeurs.institutions, robot PC 06) ---
+# Échantillon RÉEL lu par le PC 06 dans Prisma le 22/07/2026 (dossier 2905).
+INST_PRISMA = [
+    {"type": "Caisse congés payés", "uc_id": "ucVakantiekas", "nom1": "RJV",
+     "rue": "Warmoesberg", "numero": "48", "code_postal": "1000", "localite": "Bruxelles",
+     "num_affiliation": "", "langue": "N"},
+    {"type": "Accident travail", "uc_id": "ucArbeidsongevallen", "nom1": "ASSUBEL",
+     "rue": "Rue de Laeken", "numero": "35", "code_postal": "1000",
+     "localite": "Bruxelles ville", "num_affiliation": "", "langue": "F"},
+    {"type": "Service médical", "uc_id": "ucArbeidsgeneeskundige", "nom1": "MSR FAMEDI",
+     "rue": "Quai aux Pierres de taille", "numero": "16", "boite": "3",
+     "code_postal": "1000", "localite": "Bruxelles ville",
+     "num_affiliation": "2905/77", "langue": "F"},
+    {"type": "ONEM", "uc_id": "ucRVA", "nom1": "O.N.E.M.", "rue": "Rue Molitor",
+     "numero": "8 a", "code_postal": "6700", "localite": "Arlon"},   # pas de case -> ignoré
+]
+
+
+def test_prisma_institutions_remplissent_les_bonnes_cases():
+    """Le dossier Prisma du client (robot PC 06) remplit caisse / assurance / SEPPT,
+    n° d'affiliation compris — et l'emporte sur le nom saisi au formulaire."""
+    t = _texte(R.build_reglement(
+        {'reglement_langue': 'FR', 'num_entreprise': '0754615359',
+         'seppt': 'Mensura',                       # saisi -> doit perdre contre Prisma
+         'institutions_prisma': INST_PRISMA,
+         'regimes': [{'cp': '112'}]}, IDENT, _tpl('FR')))
+    i = t.index('Caisse de vacances annuelles')
+    bloc = t[i:i + 220]
+    assert 'RJV' in bloc and 'Warmoesberg 48 1000 Bruxelles' in re.sub(r'\s+', ' ', bloc), bloc[:120]
+    i = t.index('Assurance-loi accidents du travail')
+    bloc = re.sub(r'\s+', ' ', t[i:i + 220])
+    assert 'ASSUBEL' in bloc and 'Rue de Laeken 35 1000' in bloc, bloc[:120]
+    i = t.index('Service externe pour la Prévention')
+    bloc = re.sub(r'\s+', ' ', t[i:i + 260])
+    assert 'MSR FAMEDI' in bloc and 'Quai aux Pierres de taille 16 bte 3' in bloc, bloc[:150]
+    assert '2905/77' in bloc, 'le n° d’affiliation SEPPT du client n’est pas repris'
+    assert 'Mensura' not in bloc, 'la saisie formulaire a écrasé le dossier Prisma'
+    assert 'O.N.E.M' not in t or 'Arlon' not in t[:t.index('Article 3')], \
+        'une institution sans case (ONEM) a fui dans le document'
+
+
+def test_prisma_bloc_entier_sans_hybride():
+    """Une institution Prisma sans adresse donne des blancs — jamais le nom Prisma
+    collé à l'adresse d'une autre source (règle anti-hybride)."""
+    t = _texte(R.build_reglement(
+        {'reglement_langue': 'FR', 'num_entreprise': '0754615359',
+         'institutions_prisma': [{'uc_id': 'ucArbeidsongevallen', 'nom1': 'ASSUBEL'}],
+         'regimes': [{'cp': '112'}]}, IDENT, _tpl('FR')))
+    i = t.index('Assurance-loi accidents du travail')
+    bloc = re.sub(r'\s+', ' ', t[i:i + 200])
+    assert 'ASSUBEL' in bloc
+    assert 'Rue de Laeken' not in bloc and 'Warmoesberg' not in bloc, bloc[:140]
+
+
+def test_prisma_absent_ou_malforme_sans_effet():
+    """Pas de colonne, liste vide, ou entrées malformées : le règlement sort comme avant."""
+    base = {'reglement_langue': 'FR', 'num_entreprise': '0754615359',
+            'seppt': 'Mensura', 'regimes': [{'cp': '112'}]}
+    ref = _texte(R.build_reglement(dict(base), IDENT, _tpl('FR')))
+    for inst in (None, [], [None, 42, {'uc_id': 'ucInconnu', 'nom1': 'X'}]):
+        t = _texte(R.build_reglement(dict(base, institutions_prisma=inst), IDENT, _tpl('FR')))
+        assert t == ref, f'institutions_prisma={inst!r} a modifié le document'
