@@ -149,11 +149,11 @@ def save_employeur(form_data):
             'nom_societe': form_data.get('nom_societe') or '',
             'email': form_data.get('email') or '',
             'data': form_data,
-            # Le robot PC 06 ne prend QUE les lignes 'pending' : sans statut explicite,
-            # une affiliation neuve restait invisible pour lui (NULL) et l'encodage ne
-            # démarrait jamais. Sur une re-soumission, 'pending' relance la vérification
-            # — le robot ne ré-encode jamais si numero_employeur est déjà rempli.
-            'statut': 'pending',
+            # 'standby' : le dossier est enregistré mais l'encodage NE PART PAS tout
+            # seul (demande explicite de Dims, 23/07). Le robot PC 06 ne prend que les
+            # 'pending' ; c'est le bouton « Lancer l'encodage » du Suivi des dossiers
+            # (POST /employeurs/encoder) qui bascule standby -> pending.
+            'statut': 'standby',
             'updated_at': datetime.now().isoformat(),
         }
         r = requests.post(
@@ -311,17 +311,20 @@ def completer_employeur():
     try:
         import urllib.parse
         nq = urllib.parse.quote(num)
-        r = requests.get(f"{SUPABASE_URL}/rest/v1/employeurs?num_entreprise=eq.{nq}&select=data&limit=1",
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/employeurs?num_entreprise=eq.{nq}&select=data,statut&limit=1",
                          headers=_supabase_headers(), timeout=10)
         rows = r.json() if r.status_code < 300 else []
         if not rows:
             return jsonify({"error": "Employeur introuvable"}), 404
         data = rows[0].get('data') or {}
         data.update(champs)                                  # merge : les nouveaux champs écrasent
+        # Un dossier volontairement EN ATTENTE (standby) le reste : compléter des champs
+        # ne doit pas déclencher l'encodage — seul le bouton « Lancer l'encodage » le fait.
+        nouveau_statut = 'standby' if rows[0].get('statut') == 'standby' else 'pending'
         hdr = {**_supabase_headers(), 'Content-Type': 'application/json', 'Prefer': 'return=representation'}
         pr = requests.patch(
             f"{SUPABASE_URL}/rest/v1/employeurs?num_entreprise=eq.{nq}",
-            json={'data': data, 'statut': 'pending', 'updated_at': datetime.utcnow().isoformat()},
+            json={'data': data, 'statut': nouveau_statut, 'updated_at': datetime.utcnow().isoformat()},
             headers=hdr, timeout=10)
         if pr.status_code >= 300:
             return jsonify({"error": pr.text[:200]}), 500
@@ -329,6 +332,38 @@ def completer_employeur():
         return jsonify(out[0] if isinstance(out, list) and out else {"ok": True}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/employeurs/encoder', methods=['POST'])
+def encoder_employeur():
+    """Lance l'encodage d'un dossier en attente : standby -> pending, que le robot
+    PC 06 prend alors sous 30 s. Action EXPLICITE de la gestionnaire (bouton du §10) —
+    jamais automatique. Le robot ne ré-encode pas si numero_employeur existe déjà."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    if not verify_user_token(request):
+        return jsonify({"error": "Non authentifié"}), 401
+    d = request.get_json(silent=True) or {}
+    num = str(d.get('num_entreprise') or '').strip()
+    if not num:
+        return jsonify({"error": "num_entreprise requis"}), 400
+    try:
+        import urllib.parse
+        nq = urllib.parse.quote(num)
+        hdr = {**_supabase_headers(), 'Content-Type': 'application/json',
+               'Prefer': 'return=representation'}
+        pr = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/employeurs?num_entreprise=eq.{nq}",
+            json={'statut': 'pending', 'updated_at': datetime.utcnow().isoformat()},
+            headers=hdr, timeout=10)
+        if pr.status_code >= 300:
+            return jsonify({"error": pr.text[:200]}), 500
+        out = pr.json()
+        if not (isinstance(out, list) and out):
+            return jsonify({"error": "Employeur introuvable"}), 404
+        return jsonify({"ok": True, "statut": "pending"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 # ============== ÉTAT DE PRESTATIONS (parser) ==============
 def parse_etat_prestation(reader):
