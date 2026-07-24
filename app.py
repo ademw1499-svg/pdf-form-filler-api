@@ -144,16 +144,17 @@ def save_employeur(form_data):
         print("[SUPABASE] pas de num_entreprise -> employeur non sauvegardé")
         return
     try:
+        # Choix de la gestionnaire à l'affiliation (case « Lancer l'encodage à la
+        # validation ») : coché/absent -> 'pending' (le robot PC 06 encode tout de
+        # suite) ; explicitement décoché -> 'standby' (le dossier attend, on le lance
+        # ensuite avec le bouton « Lancer l'encodage » du Suivi des dossiers).
+        statut = 'standby' if form_data.get('encoder_a_validation') is False else 'pending'
         row = {
             'num_entreprise': num,
             'nom_societe': form_data.get('nom_societe') or '',
             'email': form_data.get('email') or '',
             'data': form_data,
-            # 'standby' : le dossier est enregistré mais l'encodage NE PART PAS tout
-            # seul (demande explicite de Dims, 23/07). Le robot PC 06 ne prend que les
-            # 'pending' ; c'est le bouton « Lancer l'encodage » du Suivi des dossiers
-            # (POST /employeurs/encoder) qui bascule standby -> pending.
-            'statut': 'standby',
+            'statut': statut,
             'updated_at': datetime.now().isoformat(),
         }
         r = requests.post(
@@ -166,9 +167,13 @@ def save_employeur(form_data):
             },
             json=row, timeout=10,
         )
-        if r.status_code >= 300 and 'statut' in r.text:
-            # Base sans colonne statut : on sauvegarde quand même le dossier (l'encodage
-            # automatique, lui, exige la colonne — SQL du §10).
+        if r.status_code >= 300 and row.get('statut'):
+            # Échec lié au statut (colonne absente, OU valeur 'standby' refusée par un
+            # enum/contrainte) : on RE-sauvegarde sans le statut plutôt que de PERDRE le
+            # dossier. Il reste alors avec statut vide -> le Suivi des dossiers affiche
+            # quand même « Lancer l'encodage » (le robot, lui, ne prend que 'pending').
+            print(f"[SUPABASE] statut '{row['statut']}' refusé ({r.status_code}: {r.text[:120]}) "
+                  f"-> nouvel essai sans statut")
             row.pop('statut', None)
             r = requests.post(
                 f"{SUPABASE_URL}/rest/v1/employeurs?on_conflict=num_entreprise",
