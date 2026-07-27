@@ -1008,6 +1008,27 @@ def _ajouter_fonds_employe(doc, lang, fonds):
             return
 
 
+def _supprimer_assurance_vide(doc, lang):
+    """Assurance-loi inconnue -> le point 3 de l'Article 2 est SUPPRIMÉ du document.
+
+    Décision Dims (27/07/2026) : on automatise la pratique réelle de la gestionnaire,
+    qui retire la ligne à la main plutôt que d'envoyer un document à pointillés. La
+    numérotation des autres points est conservée (comme à la main) ; si la conseillère
+    juridique demande une renumérotation, on l'ajoutera ici.
+
+    À appeler AVANT _remplir_jetons : on repère le paragraphe par son TITRE + son
+    JETON de nom (le couple est unique par langue ; le titre seul matcherait d'autres
+    mentions de l'assurance, le jeton seul matche la caisse de vacances en FR)."""
+    titre = 'verzekeringsmaatschappij' if str(lang).upper() == 'NL' else 'assurance-loi'
+    jeton = '{{%s}}' % _inst_tokens(lang)['assurance']['nom']
+    for p in doc.paragraphs:
+        t = p.text or ''
+        if titre in t.lower() and jeton in t:
+            p._element.getparent().remove(p._element)
+            return True
+    return False
+
+
 def _ajouter_apres_label(doc, ancre, valeur):
     """Ajoute `valeur` à la fin du 1er paragraphe contenant `ancre` (label NL qui finit
     par « : »). No-op si `valeur` est vide/BLANK, si l'ancre est absente, ou si la valeur
@@ -1075,6 +1096,11 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
         den_emp = _den_simple(payload.get('cp_employe'),
                               payload.get('cp_employe_denomination'))
     valeurs = _valeurs(payload, identity, repertoire)
+    # Assurance-loi : si aucun nom ne ressort d'AUCUNE couche (formulaire, répertoire,
+    # Prisma), le bloc du point 3 est supprimé au lieu d'imprimer des pointillés.
+    nom_assurance = str(valeurs.get(_inst_tokens(lang)['assurance']['nom']) or '').strip()
+    if not nom_assurance or nom_assurance == BLANK:
+        _supprimer_assurance_vide(doc, lang)
     sequentiels = {
         'Commission_paritaire_Em': [cp_ouv, cp_emp],
         'Commission_paritaire_Em_v1': [den_ouv, den_emp],
