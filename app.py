@@ -764,25 +764,31 @@ def paie_job(job_id):
         return jsonify({"error": str(e)}), 500
 
 # ============== BCE / BANQUE-CARREFOUR DES ENTREPRISES ==============
-def _bce_forme(texte):
-    """Texte 'Forme légale' BCE -> valeur du select du portail."""
+def _bce_forme(texte, lang='fr'):
+    """Texte 'Forme légale / Rechtsvorm' BCE -> forme normalisée, DANS LA LANGUE
+    demandée. Reconnaît les libellés FR ET NL (le texte vient de la page BCE
+    dans sa langue) ; en NL on rend le libellé néerlandais (ex. 'Besloten
+    Vennootschap') comme le fait le règlement de référence."""
     t = (texte or '').lower()
-    if 'responsabilit' in t and 'limit' in t:
-        return 'SRL'
-    if 'anonyme' in t:
-        return 'SA'
-    if 'coop' in t:
-        return 'SC'
-    if 'sans but lucratif' in t or 'association' in t:
-        return 'ASBL'
-    if 'personne physique' in t:
-        return 'PERSONNE PHYSIQUE'
+    nl = str(lang).lower() == 'nl'
+    if ('responsabilit' in t and 'limit' in t) or 'besloten' in t:
+        return 'Besloten Vennootschap' if nl else 'SRL'
+    if 'anonyme' in t or 'naamloze' in t:
+        return 'Naamloze Vennootschap' if nl else 'SA'
+    if 'coop' in t or 'coöp' in t or 'cooperatieve' in t or 'coöperatieve' in t:
+        return 'Coöperatieve Vennootschap' if nl else 'SC'
+    if 'sans but lucratif' in t or 'association' in t or 'zonder winst' in t or 'vereniging' in t:
+        return 'VZW' if nl else 'ASBL'
+    if 'personne physique' in t or 'natuurlijk persoon' in t:
+        return 'Natuurlijk persoon' if nl else 'PERSONNE PHYSIQUE'
     return ''
 
-def _bce_data(numero):
+def _bce_data(numero, lang='fr'):
     """Interroge VIES (nom+adresse, JSON officiel UE) et la fiche publique BCE
     (dénomination, forme légale, NACE, ONSS, représentants). Données publiques.
-    Retourne un dict `out` (avec clé 'trouve'), ou {'error':…, '_status':…}."""
+    `lang` ('fr'|'nl') : langue de la fiche BCE — pour un règlement NL on lit la
+    BCE en néerlandais (forme juridique, adresse, activité en NL). Retourne un dict."""
+    _L = 'nl' if str(lang).lower() == 'nl' else 'fr'
     num = re.sub(r'\D', '', numero or '')
     if len(num) == 9:
         num = '0' + num
@@ -815,7 +821,7 @@ def _bce_data(numero):
     try:
         r = requests.get(
             "https://kbopub.economie.fgov.be/kbopub/toonondernemingps.html",
-            params={"ondernemingsnummer": num, "lang": "fr"},
+            params={"ondernemingsnummer": num, "lang": _L},
             headers={"User-Agent": "Mozilla/5.0"}, timeout=12)
         html = r.text if r.status_code < 300 else ''
         def _cell(pattern):
@@ -824,33 +830,35 @@ def _bce_data(numero):
                 return ''
             t = _unescape(re.sub(r'<[^>]+>|\s+', ' ', m.group(1))).strip()
             return t
-        deno = _cell(r'D\S+nomination:')
+        deno = _cell(r'(?:D\S+nomination|Naam):')
         if deno:
             # coupe les mentions du type "Dénomination en français, depuis le ..."
-            out['nom_societe'] = re.split(r'\s{2,}|D\S+nomination', deno)[0].strip() or out.get('nom_societe', '')
+            out['nom_societe'] = re.split(r'\s{2,}|D\S+nomination|Naam', deno)[0].strip() or out.get('nom_societe', '')
             out['trouve'] = True
-        forme_txt = _cell(r'Forme l\S+gale')
-        forme = _bce_forme(re.split(r'Depuis', forme_txt)[0] if forme_txt else '')
+        forme_txt = _cell(r'(?:Forme l\S+gale|Rechtsvorm)')
+        forme = _bce_forme(re.split(r'Depuis|Sinds', forme_txt)[0] if forme_txt else '', _L)
         if forme:
             out['forme_juridique'] = forme
         # Code NACE + secteur d'activité (priorité ONSS -> TVA -> NACE-BEL 2008).
         # NB : une société a souvent PLUSIEURS codes NACE ; on prend l'activité
         # principale ONSS et le gestionnaire vérifie.
         flat = re.sub(r'\s+', ' ', _unescape(re.sub(r'<[^>]+>', ' ', html)).replace('’', chr(39)))
-        for pref in (r'ONSS\s*\d{4}', r'TVA\s*\d{4}', r''):
-            mn = re.search(pref + r'\s*(\d{2}\.\d{3})\s*-\s*(.+?)\s+Depuis', flat)
+        for pref in (r'(?:ONSS|RSZ)\s*\d{4}', r'(?:TVA|BTW|btw)\s*\d{4}', r''):
+            mn = re.search(pref + r'\s*(\d{2}\.\d{3})\s*-\s*(.+?)\s+(?:Depuis|Sinds)', flat)
             if mn:
                 out['code_nace'] = mn.group(1)
                 out['secteur_activite'] = mn.group(2).strip()[:70]
                 break
         # Adresse du siège (secours si VIES n'a pas répondu)
-        if not out.get('adresse_siege_social_1'):
-            m = re.search(r'Adresse du si\S+ge:?(.*?)</tr>', html, re.S)
+        # En NL, l'adresse BCE néerlandaise (Keizerslaan…) PRIME sur VIES (qui la
+        # renvoie en FR) — sinon un doc NL affiche l'adresse en français.
+        if _L == 'nl' or not out.get('adresse_siege_social_1'):
+            m = re.search(r'(?:Adresse du si\S+ge|Adres van de zetel):?(.*?)</tr>', html, re.S)
             if m:
                 txt = re.sub(r'<br\s*/?>', '\n', m.group(1))
                 txt = _unescape(re.sub(r'<[^>]+>', ' ', txt))
                 lignes = [re.sub(r'\s+', ' ', l).strip() for l in txt.split('\n')]
-                lignes = [l for l in lignes if l and 'Depuis' not in l]
+                lignes = [l for l in lignes if l and 'Depuis' not in l and 'Sinds' not in l]
                 if lignes:
                     out['adresse_siege_social_1'] = lignes[0]
                     out['trouve'] = True
@@ -865,10 +873,10 @@ def _bce_data(numero):
         # (grosses sociétés), soit directement en clair (petites sociétés) -> on
         # scanne TOUTE la section « Fonctions » quelle que soit la mise en page.
         reps = []
-        msec = re.search(r'Fonctions</h2>(.*?)(?:<h2>|<td class="I")', html, re.S)
+        msec = re.search(r'(?:Fonctions|Functies)</h2>(.*?)(?:<h2>|<td class="I")', html, re.S)
         bloc = msec.group(1) if msec else ''
         for row in re.findall(r'<tr[^>]*>(.*?)</tr>', bloc, re.S):
-            if 'Depuis' not in row:  # chaque titulaire a une date « Depuis le … »
+            if 'Depuis' not in row and 'Sinds' not in row:  # date « Depuis/Sinds le … »
                 continue
             tds = re.findall(r'<td[^>]*>(.*?)</td>', row, re.S)
             if len(tds) < 2:
@@ -947,15 +955,27 @@ def _bce_data(numero):
                     break
         except Exception:
             pass
-        # Dénomination + adresse FR structurées (priorité sur VIES/BCE si présentes)
-        deno_fr = ((ident.get('denomination') or {}).get('fr') or '').strip()
-        if deno_fr:
-            out['nom_societe'] = deno_fr
+        # Dénomination + adresse structurées, DANS LA LANGUE du doc (priorité sur
+        # VIES/BCE). Cette source est multilingue (.fr/.nl) : un doc NL doit prendre
+        # le nom de rue et la commune en néerlandais (Keizerslaan, Brussel), pas en FR.
+        def _loc(dico):  # nom : repli FR/NL toléré (nom propre, souvent identique)
+            dico = dico or {}
+            return (dico.get(_L) or dico.get('fr') or dico.get('nl') or '').strip()
+        def _loc_adr(dico):  # adresse : en NL, PAS de repli FR (l'ONSS est FR-only)
+            dico = dico or {}
+            if _L == 'nl':
+                return (dico.get('nl') or '').strip()
+            return (dico.get('fr') or dico.get('nl') or '').strip()
+        deno_loc = _loc(ident.get('denomination'))
+        if deno_loc:
+            out['nom_societe'] = deno_loc
         adr = ident.get('address') or {}
-        rue = ((adr.get('streetName') or {}).get('fr') or '').strip()
+        # En NL, si l'ONSS n'a pas de rue NL, `rue` reste vide -> on GARDE l'adresse
+        # BCE néerlandaise (Keizerslaan) déjà posée plus haut, au lieu de l'écraser en FR.
+        rue = _loc_adr(adr.get('streetName'))
         if rue:
             out['adresse_siege_social_1'] = f"{rue} {adr.get('houseNumber', '')}".strip()
-            commune = ((adr.get('municipalityName') or {}).get('fr') or '').strip()
+            commune = _loc_adr(adr.get('municipalityName'))
             out['adresse_siege_social_2'] = f"{adr.get('postCode', '')} {commune}".strip()
     except Exception:
         pass
@@ -963,11 +983,13 @@ def _bce_data(numero):
     return out
 
 
-def _bce_etablissements(numero):
+def _bce_etablissements(numero, lang='fr'):
     """Adresses des unités d'établissement (= vrais sièges d'exploitation) depuis
     la BCE Public Search. Ce n'est PAS le siège social : c'est là où l'activité
     s'exerce réellement (annexe 5 du règlement). Retourne une liste d'adresses
-    « rue n°, CP localité » (souvent une seule pour les petits clients)."""
+    « rue n°, CP localité » (souvent une seule pour les petits clients).
+    `lang` ('fr'|'nl') : langue de la fiche BCE (adresses en NL pour un doc NL)."""
+    _L = 'nl' if str(lang).lower() == 'nl' else 'fr'
     n = re.sub(r'\D', '', numero or '')
     if len(n) == 10 and n[0] == '0':
         n = n[1:]                                    # kbopub attend le n° sans le 0 initial
@@ -976,14 +998,14 @@ def _bce_etablissements(numero):
     try:
         r = requests.get(
             "https://kbopub.economie.fgov.be/kbopub/toonvestigingps.html",
-            params={"ondernemingsnummer": n, "lang": "fr"},
+            params={"ondernemingsnummer": n, "lang": _L},
             headers={"User-Agent": "Mozilla/5.0"}, timeout=12)
         html = r.text if r.status_code < 300 else ''
     except Exception:
         return []
     flat = re.sub(r'\s+', ' ', _unescape(re.sub(r'<[^>]+>', ' ', html)))
     etabs = []
-    for m in re.finditer(r"Adresse de l'unit.{0,3} d.{0,3}.tablissement:*\s*(.+?)\s+(?:Depuis|Num.ro|Pas de|Statut)", flat):
+    for m in re.finditer(r"(?:Adresse de l'unit.{0,3} d.{0,3}.tablissement|Adres van de vestigingseenheid):*\s*(.+?)\s+(?:Depuis|Num.ro|Pas de|Statut|Sinds|Nummer|Geen|Status)", flat):
         adr = re.sub(r'\s+', ' ', m.group(1)).strip(' :')
         adr = re.sub(r'\s+(\d{4}\s+[A-Za-zÀ-ÿ])', r', \1', adr)   # virgule avant le code postal
         if adr and adr not in etabs:
@@ -1405,14 +1427,17 @@ def reglement_generer():
     est choisi. Données publiques -> pas d'auth (comme /bce)."""
     payload = request.get_json(silent=True) or {}
     num = payload.get('num_entreprise')
+    # Langue du règlement -> langue de la fiche BCE (forme juridique, adresse,
+    # activité dans la bonne langue). Un doc NL doit lire la BCE en néerlandais.
+    bce_lang = 'nl' if str(payload.get('reglement_langue') or 'FR').upper() == 'NL' else 'fr'
     identity = None
     if num:
-        d = _bce_data(num)
+        d = _bce_data(num, bce_lang)
         if not d.get('error'):
             identity = d
             # Vrai siège d'exploitation (annexe 5) : unités d'établissement BCE
             try:
-                etabs = _bce_etablissements(num)
+                etabs = _bce_etablissements(num, bce_lang)
                 if etabs:
                     identity['sieges_exploitation'] = ' ; '.join(etabs)
             except Exception:
