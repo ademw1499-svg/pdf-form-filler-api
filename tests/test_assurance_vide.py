@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Assurance-loi inconnue -> le point 3 de l'Article 2 est SUPPRIMÉ (décision Dims
-27/07/2026, alignée sur la pratique de la gestionnaire), au lieu de pointillés.
+"""Assurance-loi inconnue -> le bloc (point 3 de l'Article 2) est CONSERVÉ avec les
+champs vides. C'est ce que fait le règlement de RÉFÉRENCE (dossier AUTO VIRAGE,
+comparé le 27/07/2026) : « 3. Verzekeringsmaatschappij … Benaming : ___ ».
 
-Ce qu'on verrouille, en FR ET en NL :
-- sans assurance : plus de titre « Assurance-loi / Verzekeringsmaatschappij » ;
-- les points voisins (2. caisse, 4. fonds) restent intacts — on ne supprime QUE lui ;
-- avec assurance (formulaire) : le bloc reste et porte le nom saisi ;
-- avec assurance via institutions Prisma : le bloc reste (la couche la plus forte).
+Historique : une tentative de SUPPRESSION du bloc (27/07 matin) a été annulée
+l'après-midi — elle laissait une ligne « Polisnummer » orpheline sur le point 2 et
+cassait la numérotation, et surtout l'original garde le bloc. On verrouille ici le
+bon comportement : le titre du point 3 est TOUJOURS présent (avec ou sans assureur).
 """
 import io
 import os
@@ -25,10 +25,6 @@ TPL = {'FR': os.path.join(BUNDLE, 'reglement_FR.docx'),
        'NL': os.path.join(BUNDLE, 'reglement_NL.docx')}
 TITRE = {'FR': 'Assurance-loi accidents du travail',
          'NL': 'Verzekeringsmaatschappij tegen arbeidsongevallen'}
-# NB : le modèle FR écrit « d'existence » avec l'apostrophe TYPOGRAPHIQUE (U+2019) ;
-# on s'ancre sur un fragment sans apostrophe pour ne pas dépendre du glyphe.
-VOISINS = {'FR': ('Caisse de vacances annuelles', 'Fonds de sécurité'),
-           'NL': ('Kas voor jaarlijkse vakantie', 'Fondsen voor bestaanszekerheid')}
 
 
 def _tpl(lang):
@@ -45,20 +41,14 @@ def _texte(docx_bytes):
 
 
 @pytest.mark.parametrize('lang', ['FR', 'NL'])
-def test_sans_assurance_le_bloc_disparait(lang):
+def test_sans_assurance_le_bloc_reste(lang):
+    # Pas d'assureur -> le bloc (titre point 3) est TOUJOURS là (comme l'original).
     txt = _texte(R.build_reglement({'reglement_langue': lang}, {'nom_societe': 'X'}, _tpl(lang)))
-    assert TITRE[lang] not in txt
+    assert TITRE[lang] in txt
 
 
 @pytest.mark.parametrize('lang', ['FR', 'NL'])
-def test_sans_assurance_les_voisins_restent(lang):
-    txt = _texte(R.build_reglement({'reglement_langue': lang}, {'nom_societe': 'X'}, _tpl(lang)))
-    for voisin in VOISINS[lang]:
-        assert voisin in txt, f"le point voisin « {voisin} » a disparu avec l'assurance"
-
-
-@pytest.mark.parametrize('lang', ['FR', 'NL'])
-def test_avec_assurance_formulaire_le_bloc_reste(lang):
+def test_avec_assurance_formulaire_nom_present(lang):
     payload = {'reglement_langue': lang, 'assurance_loi': 'AXA Belgium'}
     txt = _texte(R.build_reglement(payload, {'nom_societe': 'X'}, _tpl(lang)))
     assert TITRE[lang] in txt
@@ -66,7 +56,7 @@ def test_avec_assurance_formulaire_le_bloc_reste(lang):
 
 
 @pytest.mark.parametrize('lang', ['FR', 'NL'])
-def test_avec_assurance_prisma_le_bloc_reste(lang):
+def test_avec_assurance_prisma_nom_present(lang):
     payload = {'reglement_langue': lang,
                'institutions_prisma': [{'uc_id': 'ucArbeidsongevallen',
                                         'nom1': 'Ethias', 'rue': 'Rue des Croisiers',
