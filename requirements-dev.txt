@@ -1,0 +1,10 @@
+# Dépendances de DÉVELOPPEMENT/TEST uniquement (pas déployées sur Railway).
+# À installer sur une nouvelle machine avant de lancer la suite :
+#     pip install -r requirements.txt -r requirements-dev.txt
+#
+# pdfplumber : utilisé par tests/test_offre.py pour vérifier que le calque de
+# l'offre est réellement VISIBLE (extraction de texte rendu). Absent de
+# requirements.txt car la prod n'en a pas besoin.
+-r requirements.txt
+pytest==9.1.1
+pdfplumber==0.11.10
