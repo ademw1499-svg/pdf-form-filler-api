@@ -394,7 +394,10 @@ def _valeurs(payload, identity, repertoire=None):
         'Téléphone_Em': ou(payload.get('telephone')),
         'No_ONSS_Em': ou(payload.get('num_onss')),
         'No_d_entreprise_Emp': ent_fmt,
-        'No_employeur_Em': ou(payload.get('num_onss')),
+        # Point 7 « Bureau social / Sociaal Kantoor » : n° d'affiliation du client
+        # CHEZ PERSOPROJECT (n° de dossier, ex. 2493) — PAS le n° ONSS (bug vu sur
+        # AUTO VIRAGE : l'original imprime 2493, le portail imprimait 1485505-52).
+        'No_employeur_Em': ou(payload.get('numero_employeur')),
         'No_affiliation_instit_Em': BLANK,
         'No_affiliation_instit_Em_v1': BLANK,
         'Commission_paritaire_Em': ou(cpnum),

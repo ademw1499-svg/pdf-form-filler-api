@@ -1400,24 +1400,31 @@ def _fetch_reglement_template(langue):
 
 
 def _institutions_prisma(num):
-    """Institutions du dossier Prisma du client (colonne employeurs.institutions,
-    écrite par le robot PC 06). Liste de dicts, ou None. Résilient : colonne pas
-    encore créée / employeur inconnu / erreur -> None, le règlement sort comme avant."""
+    """Dossier Prisma du client : (institutions, numero_employeur PersoProject).
+    Institutions = colonne employeurs.institutions écrite par le robot PC 06 ;
+    numero_employeur = n° de dossier chez PersoProject (point 7 de l'Article 2).
+    Résilient : colonne pas encore créée / employeur inconnu / erreur -> (None, None),
+    le règlement sort comme avant."""
     if not num or not SUPABASE_URL or not SUPABASE_KEY:
-        return None
+        return None, None
     try:
         import urllib.parse
         r = requests.get(
             f"{SUPABASE_URL}/rest/v1/employeurs"
-            f"?num_entreprise=eq.{urllib.parse.quote(str(num))}&select=institutions&limit=1",
+            f"?num_entreprise=eq.{urllib.parse.quote(str(num))}"
+            f"&select=institutions,numero_employeur&limit=1",
             headers=_supabase_headers(), timeout=10)
         if r.status_code >= 300:          # ex. 42703 : colonne pas encore créée
-            return None
+            return None, None
         rows = r.json()
-        inst = rows[0].get('institutions') if rows else None
-        return inst if isinstance(inst, list) and inst else None
+        if not rows:
+            return None, None
+        inst = rows[0].get('institutions')
+        num_dossier = rows[0].get('numero_employeur')
+        return (inst if isinstance(inst, list) and inst else None,
+                str(num_dossier) if num_dossier else None)
     except Exception:
-        return None
+        return None, None
 
 
 @app.route('/reglement/generer', methods=['POST'])
@@ -1450,9 +1457,12 @@ def reglement_generer():
     # pour les données publiques (BCE), mais les données du dossier client ne doivent
     # pas être servies à quiconque poste un numéro d'entreprise.
     if verify_user_token(request):
-        inst = _institutions_prisma(num)
+        inst, num_dossier = _institutions_prisma(num)
         if inst:
             payload['institutions_prisma'] = inst
+        # n° de dossier PersoProject (point 7 Article 2, ex. 2493) — pas le n° ONSS
+        if num_dossier and not payload.get('numero_employeur'):
+            payload['numero_employeur'] = num_dossier
     model_bytes = None
     mid = (payload.get('horaire_modele') or '').strip()
     if mid:

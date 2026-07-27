@@ -147,7 +147,10 @@ def test_cp140_nue_na_pas_de_fonds_mais_ses_sous_secteurs_si():
     """Chaque sous-secteur du transport a SON fonds : sur « 140 » seule on ne peut pas
     trancher, et il vaut mieux un blanc qu'un fonds faux."""
     assert R._fonds_principal('140', 'FR') is None
-    assert R._fonds_principal('140.03', 'FR')['nom'].startswith('Fonds social pour les ouvriers')
+    # 140.03 : SFTL (correction nommée du 27/07/2026 — le SPF recopiait les fonds
+    # autobus/autocars du 140.01 sur toutes les sous-commissions ; le règlement de
+    # référence AUTO VIRAGE + sftl.be prouvent que le fonds du 140.03 est le SFTL).
+    assert R._fonds_principal('140.03', 'FR')['nom'] == 'Fonds Social Transport et Logistique'
     assert R._fonds_principal('140.04', 'FR')['nom'] == 'Fonds social Transport et Logistique'
     assert R._fonds_principal('140.06', 'NL')['nom'].startswith('Sociaal Fonds voor Taxi')
 
@@ -435,10 +438,10 @@ def test_point4_deux_fonds_ouvrier_et_employe(lang, attendu_nom):
     DEUX fonds. Le modèle n'a qu'un emplacement -> le fonds employé est injecté.
     Sans ça il était perdu (constaté sur le vrai document rempli à la main)."""
     t = gen(lang, ['140.03', '226'])
-    # le fonds ouvrier (140.03) est dans l'emplacement du point 4
-    assert ('Fonds social pour les ouvriers des entreprises des services publics'
-            in t if lang == 'FR' else
-            'Sociaal Fonds voor werklieden van de ondernemingen' in t)
+    # le fonds ouvrier (140.03) est dans l'emplacement du point 4 — le SFTL depuis
+    # la correction nommée du 27/07/2026 (réf. AUTO VIRAGE + sftl.be).
+    assert ('Fonds Social Transport et Logistique' in t if lang == 'FR' else
+            'Sociaal Fonds Transport en Logistiek' in t)
     # le fonds employé (226) est injecté, avec son adresse
     label = 'pour les employés :' if lang == 'FR' else 'voor de bedienden :'
     i = t.find(label)

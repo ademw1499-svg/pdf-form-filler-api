@@ -723,20 +723,12 @@
   "denomination": "Commission paritaire du transport et de la logistique",
   "fonds": [
    {
-    "adresse": "Avenue de la Metrologie 8, 1130 BRUXELLES",
-    "fax": "02/245.79.18",
-    "mail": "info@sociaalfondssocial.be",
-    "nom": "Fonds social pour les ouvriers des entreprises des services publics et spéciaux d'autobus et des services d'autocars",
-    "tel": "02/245.07.61",
-    "web": "http://www.sociaalfondssocial.be/"
-   },
-   {
-    "adresse": "Avenue de la Métrologie 8, 1130 BRUXELLES",
+    "adresse": "Boulevard de Smet de Naeyer 115, 1090 BRUXELLES",
     "fax": "",
     "mail": "",
-    "nom": "Fonds de solidarité Car & Bus",
+    "nom": "Fonds Social Transport et Logistique",
     "tel": "",
-    "web": ""
+    "web": "https://www.fstl.be"
    }
   ]
  },

@@ -723,20 +723,12 @@
   "denomination": "Paritair Comité voor het vervoer en de logistiek",
   "fonds": [
    {
-    "adresse": "Metrologielaan 8, 1130 BRUSSEL",
-    "fax": "02/245.79.18",
-    "mail": "info@sociaalfondssocial.be",
-    "nom": "Sociaal Fonds voor werklieden van de ondernemingen der openbare en speciale autobusdiensten en autocardiensten",
-    "tel": "02/245.07.61",
-    "web": "http://www.sociaalfondssocial.be/"
-   },
-   {
-    "adresse": "Metrologielaan 8, 1130 BRUSSEL",
+    "adresse": "de Smet de Naeyerlaan 115, 1090 BRUSSEL",
     "fax": "",
     "mail": "",
-    "nom": "Solidariteitsfonds Car & Bus",
+    "nom": "Sociaal Fonds Transport en Logistiek",
     "tel": "",
-    "web": ""
+    "web": "https://www.sftl.be"
    }
   ]
  },
