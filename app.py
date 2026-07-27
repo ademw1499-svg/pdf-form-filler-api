@@ -4,6 +4,7 @@ from pypdf import PdfReader, PdfWriter
 from pypdf.generic import (ArrayObject, DecodedStreamObject, DictionaryObject,
                            FloatObject, NameObject, NumberObject)
 from reportlab.pdfgen import canvas
+import hmac
 import io
 import os
 import re
@@ -1238,6 +1239,96 @@ def _commissions_repertoire():
         return r.json() if r.status_code < 300 and isinstance(r.json(), list) else []
     except Exception:
         return []
+
+
+# ============== CHANTIERS (tableau de bord partagé Dims <-> Claude PC06) ==============
+# La page « Chantiers » du portail et le Claude du PC 06 lisent/écrivent la MÊME
+# table Supabase `chantiers` : une seule source de vérité pour l'avancement.
+# Deux authentifications acceptées :
+#   - le login gestionnaire du portail (token Supabase, comme partout ailleurs) ;
+#   - l'en-tête X-PC06-Key == variable Railway PC06_API_KEY : accès du Claude PC06,
+#     limité à CES endpoints (la clé service_role ne sort JAMAIS vers le PC 06).
+CHANTIER_COLS = ['fiche', 'titre', 'detail', 'fait', 'bloque_par', 'ordre']
+
+def _auth_chantiers(req):
+    """Identité de l'appelant : email du gestionnaire, 'pc06', ou None si refusé."""
+    email = verify_user_token(req)
+    if email:
+        return email
+    attendu = os.environ.get('PC06_API_KEY') or ''
+    recu = req.headers.get('X-PC06-Key') or ''
+    if attendu and recu and hmac.compare_digest(attendu, recu):
+        return 'pc06'
+    return None
+
+
+@app.route('/chantiers', methods=['GET'])
+def chantiers_liste():
+    if not _auth_chantiers(request):
+        return jsonify({"error": "Non authentifié"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    try:
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/chantiers?select=*"
+                         "&order=fiche.asc,ordre.asc,id.asc&limit=1000",
+                         headers=_supabase_headers(), timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": r.text[:200]}), 500
+        return jsonify(r.json()), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/chantiers/upsert', methods=['POST'])
+def chantiers_upsert():
+    qui = _auth_chantiers(request)
+    if not qui:
+        return jsonify({"error": "Non authentifié"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    d = request.get_json(silent=True) or {}
+    row = {k: d[k] for k in CHANTIER_COLS if k in d}
+    # Cocher/décocher trace QUI et QUAND — c'est le journal d'avancement.
+    if 'fait' in row:
+        row['fait_par'] = qui if row['fait'] else ''
+        row['fait_le'] = datetime.utcnow().isoformat() if row['fait'] else None
+    row['updated_at'] = datetime.utcnow().isoformat()
+    hdr = {**_supabase_headers(), 'Content-Type': 'application/json',
+           'Prefer': 'return=representation'}
+    try:
+        if d.get('id'):
+            r = requests.patch(f"{SUPABASE_URL}/rest/v1/chantiers?id=eq.{int(d['id'])}",
+                               json=row, headers=hdr, timeout=10)
+        else:
+            if not str(row.get('titre') or '').strip():
+                return jsonify({"error": "titre requis"}), 400
+            row.setdefault('fiche', 'Divers')
+            row['cree_par'] = qui
+            r = requests.post(f"{SUPABASE_URL}/rest/v1/chantiers", json=row,
+                              headers=hdr, timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": r.text[:200]}), 500
+        out = r.json()
+        return jsonify(out[0] if isinstance(out, list) and out else out), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/chantiers/supprimer', methods=['POST'])
+def chantiers_supprimer():
+    if not _auth_chantiers(request):
+        return jsonify({"error": "Non authentifié"}), 401
+    d = request.get_json(silent=True) or {}
+    if not d.get('id'):
+        return jsonify({"error": "id requis"}), 400
+    try:
+        r = requests.delete(f"{SUPABASE_URL}/rest/v1/chantiers?id=eq.{int(d['id'])}",
+                            headers=_supabase_headers(), timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": r.text[:200]}), 500
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ============== RÈGLEMENT DE TRAVAIL ==============
