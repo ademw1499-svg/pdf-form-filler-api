@@ -74,3 +74,26 @@ def test_reglement_imprime_le_numero_de_dossier():
     payload = {'reglement_langue': 'NL', 'numero_employeur': '2493'}
     txt = _texte(R.build_reglement(payload, {'nom_societe': 'X'}, _tpl('NL')))
     assert '2493' in txt
+
+
+# ---------- 3. point « contributions directes » : team perception par langue ----------
+# Source : finances.belgium.be (Déclaration au précompte professionnel, 27/07/2026) —
+# le bureau dépend de la LANGUE de la déclaration, pas du secteur. Les 2 règlements
+# de référence (transport) écrivaient un générique « Team Perception Précompte Prof. ».
+
+def test_contributions_fr_team_namur():
+    txt = _texte(R.build_reglement({'reglement_langue': 'FR'}, {'nom_societe': 'X'}, _tpl('FR')))
+    assert 'Team Précompte Professionnel Namur' in txt
+
+def test_contributions_nl_team_mechelen():
+    txt = _texte(R.build_reglement({'reglement_langue': 'NL'}, {'nom_societe': 'X'}, _tpl('NL')))
+    assert 'Team Bedrijfsvoorheffing Mechelen' in txt
+
+def test_contributions_fr_pas_le_seppt():
+    # Le défaut ne doit pas écraser la protection anti-doublon SEPPT/point 8.
+    txt = _texte(R.build_reglement({'reglement_langue': 'FR', 'seppt': 'Mensura'},
+                                   {'nom_societe': 'X'}, _tpl('FR')))
+    import re as _re
+    m = _re.search(r'Bureau des contributions directesDénomination\s*:\s*(.{0,40})', txt)
+    assert m and 'Mensura' not in m.group(1)
+    assert m and 'Team Précompte Professionnel Namur' in m.group(1) + txt[txt.find('Bureau des contributions'):][:120]

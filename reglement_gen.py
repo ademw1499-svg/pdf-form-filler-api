@@ -1086,13 +1086,24 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
         'Commission_paritaire_Em': [cp_ouv, cp_emp],
         'Commission_paritaire_Em_v1': [den_ouv, den_emp],
     }
+    # Point « Bureau des contributions directes » : le Team Perception du SPF
+    # Finances, déterminé par la LANGUE de la déclaration — PAS par le secteur
+    # (source : finances.belgium.be, « Déclaration au précompte professionnel »,
+    # vérifié le 27/07/2026). FR -> Namur, NL -> Mechelen. Les anciens règlements
+    # PersoProject écrivaient un générique « Team Perception Précompte Prof. ».
+    TEAM_PERCEPTION = ('Team Bedrijfsvoorheffing Mechelen' if lang == 'NL'
+                       else 'Team Précompte Professionnel Namur')
     if lang != 'NL':
         # Le modèle FR réutilise {{Nom_1_institution_Inst}} pour le point 6 (SEPPT)
         # PUIS le point 8 (Bureau des contributions directes) : sans remplacement
         # positionnel, le nom du SEPPT s'imprime aussi comme bureau des contributions.
-        # 1ʳᵉ occurrence = SEPPT, 2ᵉ = blanc à compléter. (Le NL n'a pas ce doublon.)
+        # 1ʳᵉ occurrence = SEPPT, 2ᵉ = le team perception.
         sequentiels['Nom_1_institution_Inst'] = [
-            valeurs.get('Nom_1_institution_Inst', BLANK), BLANK]
+            valeurs.get('Nom_1_institution_Inst', BLANK), TEAM_PERCEPTION]
+    else:
+        # NL : le point 8 a son propre jeton (_v4), libre (aucune institution NL
+        # ne l'utilise pour son nom).
+        valeurs.setdefault('Nom_1_institution_Inst_v4', TEAM_PERCEPTION)
     _remplir_jetons(doc, valeurs, sequentiels)
     # Annexe 7 — caméras de surveillance (défaut 0 si le client n'en a pas)
     nb_cam = str(payload.get('nombre_cameras') or payload.get('cameras') or '').strip() or '0'
