@@ -817,13 +817,26 @@ def _bce_data(numero, lang='fr'):
     except Exception:
         pass
 
-    # 2) Fiche publique BCE : dénomination officielle + forme légale (best effort)
+    # 2) Fiche publique BCE : dénomination officielle + forme légale (best effort).
+    # kbopub refuse PARFOIS les IP de datacenter (Railway) -> une requête ratée
+    # laissait forme/activité en pointillés (vu sur APEX LOGISTICS le 27/07/2026,
+    # alors que la même requête passait 2 min plus tard). Une 2e tentative suffit
+    # presque toujours -> on réessaie UNE fois avant d'abandonner.
     try:
-        r = requests.get(
-            "https://kbopub.economie.fgov.be/kbopub/toonondernemingps.html",
-            params={"ondernemingsnummer": num, "lang": _L},
-            headers={"User-Agent": "Mozilla/5.0"}, timeout=12)
-        html = r.text if r.status_code < 300 else ''
+        html = ''
+        for _essai in (1, 2):
+            try:
+                r = requests.get(
+                    "https://kbopub.economie.fgov.be/kbopub/toonondernemingps.html",
+                    params={"ondernemingsnummer": num, "lang": _L},
+                    headers={"User-Agent": "Mozilla/5.0"}, timeout=12)
+                if r.status_code < 300 and ('nomination' in r.text or 'Naam' in r.text):
+                    html = r.text
+                    break
+            except Exception:
+                pass
+            import time as _t
+            _t.sleep(1.0)
         def _cell(pattern):
             m = re.search(pattern + r'.*?<td[^>]*>(.*?)</td>', html, re.S)
             if not m:
