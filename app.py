@@ -1366,6 +1366,82 @@ def chantiers_supprimer():
         return jsonify({"error": str(e)}), 500
 
 
+# ============== SUIVI IT-IA (todolist interne Kamil & Adem) ==============
+# La page « Suivi IT-IA » du portail lit/écrit la table Supabase `suivi_itia`.
+# Même modèle d'auth que les chantiers : token portail OU clé PC06.
+ITIA_COLS = ['titre', 'assigne', 'statut', 'note', 'ordre']
+ITIA_STATUTS = ('afaire', 'encours', 'fait')
+ITIA_ASSIGNES = ('', 'kamil', 'adem')
+
+
+@app.route('/itia', methods=['GET'])
+def itia_liste():
+    if not _auth_chantiers(request):
+        return jsonify({"error": "Non authentifié"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    try:
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/suivi_itia?select=*"
+                         "&order=ordre.asc,id.asc&limit=1000",
+                         headers=_supabase_headers(), timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": r.text[:200]}), 500
+        return jsonify(r.json()), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/itia/upsert', methods=['POST'])
+def itia_upsert():
+    qui = _auth_chantiers(request)
+    if not qui:
+        return jsonify({"error": "Non authentifié"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    d = request.get_json(silent=True) or {}
+    row = {k: d[k] for k in ITIA_COLS if k in d}
+    if 'statut' in row and row['statut'] not in ITIA_STATUTS:
+        return jsonify({"error": "statut invalide"}), 400
+    if 'assigne' in row and row['assigne'] not in ITIA_ASSIGNES:
+        return jsonify({"error": "assigne invalide"}), 400
+    row['updated_at'] = datetime.utcnow().isoformat()
+    hdr = {**_supabase_headers(), 'Content-Type': 'application/json',
+           'Prefer': 'return=representation'}
+    try:
+        if d.get('id'):
+            r = requests.patch(f"{SUPABASE_URL}/rest/v1/suivi_itia?id=eq.{int(d['id'])}",
+                               json=row, headers=hdr, timeout=10)
+        else:
+            if not str(row.get('titre') or '').strip():
+                return jsonify({"error": "titre requis"}), 400
+            row['cree_par'] = qui
+            r = requests.post(f"{SUPABASE_URL}/rest/v1/suivi_itia", json=row,
+                              headers=hdr, timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": r.text[:200]}), 500
+        out = r.json()
+        return jsonify(out[0] if isinstance(out, list) and out else out), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/itia/supprimer', methods=['POST'])
+def itia_supprimer():
+    if not _auth_chantiers(request):
+        return jsonify({"error": "Non authentifié"}), 401
+    d = request.get_json(silent=True) or {}
+    if not d.get('id'):
+        return jsonify({"error": "id requis"}), 400
+    try:
+        r = requests.delete(f"{SUPABASE_URL}/rest/v1/suivi_itia?id=eq.{int(d['id'])}",
+                            headers=_supabase_headers(), timeout=10)
+        if r.status_code >= 300:
+            return jsonify({"error": r.text[:200]}), 500
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ============== RÈGLEMENT DE TRAVAIL ==============
 _HORAIRE_MANIFEST = None
 
