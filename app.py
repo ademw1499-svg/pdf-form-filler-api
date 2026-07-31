@@ -763,6 +763,91 @@ def paie_job(job_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ============== AFFILIATIONS : encodage employeur piloté par le veilleur ==============
+# Même principe que la paie : le veilleur du serveur Prisma ne parle PLUS à Supabase
+# directement (la clé service_role en dur cassait à chaque rotation). Il passe par CE
+# backend avec le jeton STABLE X-Prestations-Token ; c'est le backend qui détient les
+# clés Supabase (variables Railway). Résultat : plus aucune clé Supabase sur le serveur.
+def _veilleur_autorise(req):
+    """Auth machine (veilleur) : le jeton stable partagé, comme pour la paie."""
+    attendu = os.environ.get('PRESTATIONS_TOKEN')
+    return bool(attendu) and req.headers.get('X-Prestations-Token') == attendu
+
+
+@app.route('/affiliations/a-traiter', methods=['GET'])
+def affiliations_a_traiter():
+    """Le veilleur récupère les affiliations à encoder : statut 'pending' (encodage
+    demandé) ou 'a_encoder' (canal secours). Les 'standby' (téléchargées mais encodage
+    NON demandé) ne remontent jamais."""
+    if not _veilleur_autorise(request):
+        return jsonify({"error": "Non autorisé"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    try:
+        q = "statut=in.(pending,a_encoder)&order=created_at.asc&select=*"
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/employeurs?{q}",
+                         headers=_supabase_headers(), timeout=15)
+        return jsonify(r.json() if r.status_code < 300 else []), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# Colonnes qui peuvent ne pas exister encore côté Supabase (ALTER pas fait partout).
+_AFFIL_COLS_OPT = ('manquants', 'institutions')
+
+@app.route('/affiliations/maj', methods=['POST'])
+def affiliations_maj():
+    """Le veilleur met à jour une affiliation : statut, n° employeur, message, date de
+    traitement, et éventuellement checklist/institutions. Si une colonne optionnelle
+    n'existe pas encore, on retente sans elle (au lieu d'échouer)."""
+    if not _veilleur_autorise(request):
+        return jsonify({"error": "Non autorisé"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    d = request.get_json() or {}
+    id_ = d.get('id')
+    if not id_:
+        return jsonify({"error": "id requis"}), 400
+    champs = {c: d[c] for c in ('statut', 'numero_employeur', 'message', 'traite_at',
+                                'manquants', 'institutions') if c in d}
+    if not champs:
+        return jsonify({"ok": True, "note": "rien à mettre à jour"}), 200
+    url = f"{SUPABASE_URL}/rest/v1/employeurs?id=eq.{id_}"
+    hdr = {**_supabase_headers(), 'Content-Type': 'application/json', 'Prefer': 'return=minimal'}
+    try:
+        r = requests.patch(url, headers=hdr, json=champs, timeout=15)
+        if r.status_code >= 300:
+            absentes = [c for c in _AFFIL_COLS_OPT if c in champs and c in (r.text or '')]
+            if absentes:
+                champs = {k: v for k, v in champs.items() if k not in absentes}
+                r = requests.patch(url, headers=hdr, json=champs, timeout=15)
+        if r.status_code >= 300:
+            return jsonify({"error": f"Supabase {r.status_code}: {r.text[:200]}"}), 500
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/affiliations/recuperer-orphelines', methods=['POST'])
+def affiliations_recuperer_orphelines():
+    """Au démarrage du veilleur : les affiliations restées en 'processing' sont
+    orphelines (un seul veilleur) -> repassées en 'pending'. Renvoie le nombre repris."""
+    if not _veilleur_autorise(request):
+        return jsonify({"error": "Non autorisé"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    try:
+        r = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/employeurs?statut=eq.processing",
+            headers={**_supabase_headers(), 'Content-Type': 'application/json',
+                     'Prefer': 'return=representation'},
+            json={"statut": "pending", "message": None}, timeout=15)
+        rows = r.json() if r.status_code < 300 else []
+        noms = [x.get('nom_societe') or x.get('id') for x in rows] if isinstance(rows, list) else []
+        return jsonify({"ok": True, "reprises": len(noms), "societes": noms}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # ============== BCE / BANQUE-CARREFOUR DES ENTREPRISES ==============
 def _bce_forme(texte, lang='fr'):
     """Texte 'Forme légale / Rechtsvorm' BCE -> forme normalisée, DANS LA LANGUE
