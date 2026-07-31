@@ -132,3 +132,18 @@ def test_liste_sans_jeton_401(client):
 def test_liste_renvoie_les_lignes(client):
     r = client.get('/affiliations/liste', headers=H)
     assert r.status_code == 200 and isinstance(r.get_json(), list)
+
+def test_creer_sans_jeton_401(client):
+    assert client.post('/affiliations/creer', json={'num_entreprise': '0202239951'}).status_code == 401
+
+def test_creer_sans_num_400(client):
+    assert client.post('/affiliations/creer', headers=H, json={'nom_societe': 'X'}).status_code == 400
+
+def test_creer_upsert_sur_num_entreprise(client):
+    r = client.post('/affiliations/creer', headers=H,
+                    json={'num_entreprise': '0202239951', 'nom_societe': 'PROXIMUS',
+                          'data': {'niss_gerant': '90011512363'}, 'statut': 'pending'})
+    assert r.status_code == 201
+    _, url, kw = client.faux.appels[-1]
+    assert 'on_conflict=num_entreprise' in url
+    assert kw['json']['statut'] == 'pending' and kw['json']['numero_employeur'] is None

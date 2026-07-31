@@ -849,6 +849,42 @@ def affiliations_recuperer_orphelines():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/affiliations/creer', methods=['POST'])
+def affiliations_creer():
+    """Crée/enfile une affiliation (jeton machine) — outil de TEST / d'enfilement
+    serveur. Body: {num_entreprise, nom_societe, email?, data, statut?}. Upsert sur
+    num_entreprise (re-jouable). Le veilleur la prendra ensuite comme une vraie."""
+    if not _veilleur_autorise(request):
+        return jsonify({"error": "Non autorisé"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    d = request.get_json() or {}
+    num = str(d.get('num_entreprise') or '').strip()
+    if not num:
+        return jsonify({"error": "num_entreprise requis"}), 400
+    row = {
+        'num_entreprise': num,
+        'nom_societe': d.get('nom_societe') or '',
+        'email': d.get('email') or '',
+        'data': d.get('data') or {},
+        'statut': str(d.get('statut') or 'pending'),
+        'numero_employeur': None,          # neuf : jamais encodé -> vrai encodage
+        'updated_at': datetime.now().isoformat(),
+    }
+    try:
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/employeurs?on_conflict=num_entreprise",
+            headers={**_supabase_headers(), 'Content-Type': 'application/json',
+                     'Prefer': 'resolution=merge-duplicates,return=representation'},
+            json=row, timeout=15)
+        if r.status_code >= 300:
+            return jsonify({"error": f"Supabase {r.status_code}: {r.text[:200]}"}), 500
+        out = r.json()
+        return jsonify(out[0] if isinstance(out, list) and out else {"ok": True}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/affiliations/liste', methods=['GET'])
 def affiliations_liste():
     """Vue compacte de TOUTES les affiliations (ops / diagnostic, jeton machine) :
