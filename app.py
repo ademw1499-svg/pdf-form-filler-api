@@ -848,6 +848,24 @@ def affiliations_recuperer_orphelines():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@app.route('/affiliations/liste', methods=['GET'])
+def affiliations_liste():
+    """Vue compacte de TOUTES les affiliations (ops / diagnostic, jeton machine) :
+    id, num_entreprise, nom_societe, statut, numero_employeur, updated_at."""
+    if not _veilleur_autorise(request):
+        return jsonify({"error": "Non autorisé"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    try:
+        cols = "id,num_entreprise,nom_societe,statut,numero_employeur,updated_at"
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/employeurs?select={cols}&order=updated_at.desc&limit=200",
+            headers=_supabase_headers(), timeout=15)
+        return jsonify(r.json() if r.status_code < 300 else []), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # ============== BCE / BANQUE-CARREFOUR DES ENTREPRISES ==============
 def _bce_forme(texte, lang='fr'):
     """Texte 'Forme légale / Rechtsvorm' BCE -> forme normalisée, DANS LA LANGUE

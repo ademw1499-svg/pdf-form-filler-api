@@ -125,3 +125,10 @@ def test_orphelines_repasse_processing_en_pending(client):
     assert r.status_code == 200
     _, url, kw = client.faux.appels[-1]
     assert 'statut=eq.processing' in url and kw['json']['statut'] == 'pending'
+
+def test_liste_sans_jeton_401(client):
+    assert client.get('/affiliations/liste').status_code == 401
+
+def test_liste_renvoie_les_lignes(client):
+    r = client.get('/affiliations/liste', headers=H)
+    assert r.status_code == 200 and isinstance(r.get_json(), list)
