@@ -620,6 +620,36 @@ def _cp_norm(x):
     return s
 
 
+def _cp_categorie(cp):
+    """Catégorie d'une commission paritaire belge d'après sa SÉRIE numérique
+    (structure officielle SPF Emploi) : 1xx = ouvriers, 2xx = employés,
+    3xx = mixte (ouvriers + employés). Sous-commission « 140.03 » -> base 140.
+    '' si vide/inconnue. Bug corrigé le 03/08 : la CP saisie était TOUJOURS
+    imprimée sur la ligne « ouvriers » du règlement — une 226 (employés
+    commerce international/transport-logistique) sortait « ouvriers »."""
+    from cp_paires import categorie
+    return categorie(cp)
+
+
+def _repartir_cp(payload):
+    """Répartit les CP du payload sur les lignes ouvriers/employés du modèle.
+    Champs reconnus : cp_ouvrier (1xx), cp_employe (2xx), commission_paritaire
+    (héritage : champ unique, classé par série). Mixte (3xx) -> la MÊME CP sur
+    les deux lignes (elle couvre les deux catégories).
+    -> (cp_ouvrier_saisi, cp_employe_saisi) — bruts, non normalisés."""
+    cp_o = str(payload.get('cp_ouvrier') or '').strip()
+    cp_e = str(payload.get('cp_employe') or '').strip()
+    cp_main = str(payload.get('commission_paritaire') or '').strip()
+    cat = _cp_categorie(cp_main)
+    if cat == 'mixte':
+        cp_o, cp_e = cp_o or cp_main, cp_e or cp_main
+    elif cat == 'employes':
+        cp_e = cp_e or cp_main
+    else:  # 'ouvriers' ou série inconnue -> comportement historique (ligne ouvriers)
+        cp_o = cp_o or cp_main
+    return cp_o, cp_e
+
+
 def _cp_lookup(cp_repertoire):
     """{clé CP normalisée -> {'hebdo', 'denom'}} depuis le répertoire des CP.
     Indexe aussi la variante chiffres-seuls (ex. « 10201 ») pour tolérer les saisies."""
@@ -1071,12 +1101,13 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
             return ((_fse_info(cp, lang).get('denomination')
                      or _cp_info(lut, cp).get('denom', '')
                      or (saisi or '').strip()) or BLANK)
-        cp_ouv = _cp_norm(payload.get('commission_paritaire')) or BLANK
-        cp_emp = _cp_norm(payload.get('cp_employe')) or BLANK
-        den_ouv = _den_simple(payload.get('commission_paritaire'),
-                              payload.get('cp_ouvrier_denomination'))
-        den_emp = _den_simple(payload.get('cp_employe'),
-                              payload.get('cp_employe_denomination'))
+        # Répartition par SÉRIE (1xx ouvriers / 2xx employés / 3xx mixte -> les 2
+        # lignes) : une 226 saisie seule s'imprime ligne EMPLOYÉS, plus « ouvriers ».
+        cp_o_in, cp_e_in = _repartir_cp(payload)
+        cp_ouv = _cp_norm(cp_o_in) or BLANK
+        cp_emp = _cp_norm(cp_e_in) or BLANK
+        den_ouv = _den_simple(cp_o_in, payload.get('cp_ouvrier_denomination'))
+        den_emp = _den_simple(cp_e_in, payload.get('cp_employe_denomination'))
     valeurs = _valeurs(payload, identity, repertoire)
     # Assurance-loi inconnue : on GARDE le bloc (point 3) avec les champs vides —
     # c'est ce que fait le règlement de RÉFÉRENCE (dossier AUTO VIRAGE, 27/07/2026).
@@ -1196,18 +1227,26 @@ def _regimes_du_payload(payload, cp_repertoire=None):
             })
         return items
 
-    # Rétro-compat (ancien modèle ouvrier/employé, ouverture globale unique)
+    # Rétro-compat (ancien modèle ouvrier/employé, ouverture globale unique).
+    # Répartition par SÉRIE (même règle que le règlement, bug 226 du 03/08) :
+    # 1xx -> section ouvriers ; 2xx seule -> section EMPLOYÉS uniquement ;
+    # 3xx (mixte) -> UNE section couvrant les deux catégories.
     if not (payload.get('ouverture_debut') and payload.get('ouverture_fin')):
         return []
     base = {'debut': payload.get('ouverture_debut'), 'fin': payload.get('ouverture_fin'),
             'jd': payload.get('ouverture_jour_debut', 0), 'jf': payload.get('ouverture_jour_fin', 6),
             'mx': _mxj(payload.get('max_journalier'))}
-    cp_o = payload.get('commission_paritaire')
-    cible_o, prov_o = _cible(cp_o, payload.get('heures_ouvrier'))
-    items.append({**base, 'label': _lib(cp_o, 'ouvriers'), 'cp': cp_o,
-                  'cible': cible_o, 'cible_source': prov_o})
-    cp_e = str(payload.get('cp_employe') or '').strip()
+    cp_o, cp_e = _repartir_cp(payload)
     h_e = payload.get('heures_employe')
+    if _cp_categorie(payload.get('commission_paritaire')) == 'mixte':
+        cible, prov = _cible(cp_o, payload.get('heures_ouvrier') or h_e)
+        items.append({**base, 'label': _lib(cp_o, '') or 'ouvriers et employés',
+                      'cp': cp_o, 'cible': cible, 'cible_source': prov})
+        return items
+    if cp_o:
+        cible_o, prov_o = _cible(cp_o, payload.get('heures_ouvrier'))
+        items.append({**base, 'label': _lib(cp_o, 'ouvriers'), 'cp': cp_o,
+                      'cible': cible_o, 'cible_source': prov_o})
     if cp_e or h_e:
         cible_e, prov_e = _cible(cp_e or cp_o, h_e)
         items.append({**base, 'label': _lib(cp_e or cp_o, 'employés'), 'cp': cp_e or cp_o,

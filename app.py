@@ -1655,6 +1655,16 @@ def _institutions_prisma(num):
         return None, None
 
 
+@app.route('/cp/analyse/<path:cp>', methods=['GET'])
+def cp_analyse(cp):
+    """Classe une commission paritaire (ouvriers 1xx / employés 2xx / mixte 3xx,
+    exception 211) et suggère la CP sœur du même secteur (226 -> 140, 124 -> 200).
+    Le portail l'appelle quand la gestionnaire saisit une CP, pour pré-remplir le
+    second champ. Numéros de CP = données publiques -> pas d'auth (comme /bce)."""
+    from cp_paires import analyser
+    return jsonify(analyser(cp)), 200
+
+
 @app.route('/reglement/generer', methods=['POST'])
 def reglement_generer():
     """Génère le règlement de travail (.docx) depuis le contrat §6.

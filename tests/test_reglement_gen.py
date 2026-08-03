@@ -369,6 +369,46 @@ class TestBuildReglement:
         # dénomination reprise du répertoire
         assert 'Entreprises de garage' in bloc or 'garage' in bloc.lower()
 
+    def test_cp_employes_seule_va_sur_la_ligne_employes(self):
+        # Bug du 03/08 : la CP saisie était TOUJOURS imprimée ligne « ouvriers ».
+        # Une 226 (employés) saisie seule doit sortir ligne EMPLOYÉS, ouvriers vide.
+        payload = {'reglement_langue': 'FR', 'commission_paritaire': '226'}
+        txt = _texte(R.build_reglement(payload, {'nom_societe': 'TEST'}, _tpl(TPL_FR)))
+        i_o = txt.find('Commission paritaire pour ouvrier')
+        i_e = txt.find('employé', i_o + 30)
+        assert i_o != -1 and i_e != -1
+        assert '226' not in txt[i_o:i_e]          # rien sur la ligne ouvriers
+        assert '226' in txt[i_e:i_e + 200]        # la 226 est ligne employés
+
+    def test_cp_mixte_sur_les_deux_lignes(self):
+        # 302 (horeca, mixte) couvre ouvriers ET employés -> les 2 lignes.
+        payload = {'reglement_langue': 'FR', 'commission_paritaire': '302'}
+        txt = _texte(R.build_reglement(payload, {'nom_societe': 'TEST'}, _tpl(TPL_FR)))
+        i_o = txt.find('Commission paritaire pour ouvrier')
+        i_e = txt.find('employé', i_o + 30)
+        assert '302' in txt[i_o:i_e] and '302' in txt[i_e:i_e + 200]
+
+    def test_regimes_cp_employes_seule_une_section_employes(self):
+        # Horaires : 226 seule -> UNE section « employés », pas de section ouvriers.
+        payload = {'reglement_langue': 'FR', 'commission_paritaire': '226',
+                   'ouverture_debut': '08:00', 'ouverture_fin': '18:00'}
+        items = R._regimes_du_payload(payload)
+        assert len(items) == 1
+        assert items[0]['cp'] == '226' and items[0]['label'] == 'employés'
+
+    def test_regimes_cp_mixte_une_seule_section(self):
+        payload = {'reglement_langue': 'FR', 'commission_paritaire': '302',
+                   'ouverture_debut': '08:00', 'ouverture_fin': '18:00'}
+        items = R._regimes_du_payload(payload)
+        assert len(items) == 1 and items[0]['cp'] == '302'
+
+    def test_regimes_cp_ouvriers_comportement_inchange(self):
+        payload = {'reglement_langue': 'FR', 'commission_paritaire': '124',
+                   'ouverture_debut': '08:00', 'ouverture_fin': '18:00'}
+        items = R._regimes_du_payload(payload)
+        assert len(items) == 1
+        assert items[0]['cp'] == '124' and items[0]['label'] == 'ouvriers'
+
     def test_cameras_defaut_neant(self):
         txt = _texte(R.build_reglement({'reglement_langue': 'FR'}, {'nom_societe': 'X'}, _tpl(TPL_FR)))
         i = txt.find('surveillance par caméras comporte')
