@@ -1079,23 +1079,45 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
     regs = [r for r in (payload.get('regimes') or []) if isinstance(r, dict)] \
         if isinstance(payload.get('regimes'), list) else []
     if regs:
+        # Répartition par SÉRIE, plus positionnelle (bug 03/08 : UN régime CP 226
+        # saisi seul tombait en position 0 -> ligne « ouvriers »). 1xx -> ligne
+        # ouvriers, 2xx -> ligne employés, 3xx (mixte) -> les deux ; série
+        # inconnue -> comble les trous dans l'ordre (comportement historique).
+        idx_o = idx_e = None
+        inconnus = []
+        for i, rg in enumerate(regs):
+            cat = _cp_categorie(rg.get('cp'))
+            if cat == 'ouvriers':
+                idx_o = i if idx_o is None else idx_o
+            elif cat == 'employes':
+                idx_e = i if idx_e is None else idx_e
+            elif cat == 'mixte':
+                idx_o = i if idx_o is None else idx_o
+                idx_e = i if idx_e is None else idx_e
+            else:
+                inconnus.append(i)
+        for i in inconnus:
+            if idx_o is None:
+                idx_o = i
+            elif idx_e is None:
+                idx_e = i
         def _cpn(i):
             # _cp_norm : « 140.03 » doit s'imprimer « 140.03 », pas « 14003 ».
-            return _cp_norm(regs[i].get('cp')) if i < len(regs) else ''
+            return _cp_norm(regs[i].get('cp')) if i is not None and i < len(regs) else ''
         def _den(i):
             # Dénomination OFFICIELLE (liste des Fonds de sécurité d'existence du SPF
             # Emploi). On n'utilise PAS regs[i]['label'] : c'est le libellé libre de
             # l'écran (« Car-wash », « Nettoyage »), un surnom interne — l'imprimer ici
             # donnait « Dénomination : Car-wash » au lieu de la dénomination légale.
-            if i >= len(regs):
+            if i is None or i >= len(regs):
                 return ''
             return (_fse_info(regs[i].get('cp'), lang).get('denomination')
                     or _cp_info(lut, regs[i].get('cp')).get('denom', '')
                     or (regs[i].get('denomination') or '').strip())
-        cp_ouv = _cpn(0) or BLANK
-        cp_emp = _cpn(1) or BLANK
-        den_ouv = _den(0) or BLANK
-        den_emp = _den(1) or BLANK
+        cp_ouv = _cpn(idx_o) or BLANK
+        cp_emp = _cpn(idx_e) or BLANK
+        den_ouv = _den(idx_o) or BLANK
+        den_emp = _den(idx_e) or BLANK
     else:
         def _den_simple(cp, saisi):
             return ((_fse_info(cp, lang).get('denomination')

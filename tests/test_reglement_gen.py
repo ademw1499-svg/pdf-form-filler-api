@@ -388,6 +388,29 @@ class TestBuildReglement:
         i_e = txt.find('employé', i_o + 30)
         assert '302' in txt[i_o:i_e] and '302' in txt[i_e:i_e + 200]
 
+    def test_regime_unique_employes_va_ligne_employes(self):
+        # Chemin du bug réel du 03/08 (module Règlement du portail) : UN régime
+        # CP 226 -> il tombait en position 0 = ligne « ouvriers ».
+        payload = {'reglement_langue': 'FR', 'regimes': [
+            {'cp': '226', 'label': 'Bureau', 'ouverture_debut': '08:00',
+             'ouverture_fin': '18:00'}]}
+        txt = _texte(R.build_reglement(payload, {'nom_societe': 'TEST'}, _tpl(TPL_FR)))
+        i_o = txt.find('Commission paritaire pour ouvrier')
+        i_e = txt.find('employé', i_o + 30)
+        assert '226' not in txt[i_o:i_e]
+        assert '226' in txt[i_e:i_e + 200]
+
+    def test_regimes_ordre_inverse_reclasse_par_serie(self):
+        # employés saisis AVANT les ouvriers -> chacun sur SA ligne quand même.
+        payload = {'reglement_langue': 'FR', 'regimes': [
+            {'cp': '226', 'ouverture_debut': '08:00', 'ouverture_fin': '18:00'},
+            {'cp': '140.03', 'ouverture_debut': '06:00', 'ouverture_fin': '20:00'}]}
+        txt = _texte(R.build_reglement(payload, {'nom_societe': 'TEST'}, _tpl(TPL_FR)))
+        i_o = txt.find('Commission paritaire pour ouvrier')
+        i_e = txt.find('employé', i_o + 30)
+        assert '140.03' in txt[i_o:i_e] and '226' not in txt[i_o:i_e]
+        assert '226' in txt[i_e:i_e + 200]
+
     def test_regimes_cp_employes_seule_une_section_employes(self):
         # Horaires : 226 seule -> UNE section « employés », pas de section ouvriers.
         payload = {'reglement_langue': 'FR', 'commission_paritaire': '226',
