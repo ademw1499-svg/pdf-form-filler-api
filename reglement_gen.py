@@ -1084,7 +1084,6 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
         # ouvriers, 2xx -> ligne employés, 3xx (mixte) -> les deux ; série
         # inconnue -> comble les trous dans l'ordre (comportement historique).
         idx_o = idx_e = None
-        inconnus = []
         for i, rg in enumerate(regs):
             cat = _cp_categorie(rg.get('cp'))
             if cat == 'ouvriers':
@@ -1094,9 +1093,12 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
             elif cat == 'mixte':
                 idx_o = i if idx_o is None else idx_o
                 idx_e = i if idx_e is None else idx_e
-            else:
-                inconnus.append(i)
-        for i in inconnus:
+        # Régimes NON PLACÉS (série inconnue, ou 2e CP de la même série, ex.
+        # car-wash 112 + nettoyage 121) : comblent les lignes restées vides dans
+        # l'ordre de saisie — les deux CP doivent apparaître, comme avant.
+        for i in range(len(regs)):
+            if i in (idx_o, idx_e):
+                continue
             if idx_o is None:
                 idx_o = i
             elif idx_e is None:
