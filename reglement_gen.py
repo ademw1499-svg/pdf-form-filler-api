@@ -1194,8 +1194,43 @@ def build_reglement(payload, identity=None, template_bytes=None, model_bytes=Non
         except Exception as e:
             print(f"[REGLEMENT] annexe modèle ignorée (non joignable) : {e}")
 
+    # Retire le fond JAUNE (marqueur « à compléter » du modèle) partout où le champ
+    # a finalement reçu une VRAIE valeur : un document livré ne doit pas surligner
+    # en jaune une info correcte (cadre horaire, contrôle des lois sociales…). Le
+    # marqueur reste uniquement sur ce qui est encore à compléter (BLANK).
+    _enlever_surlignage_rempli(doc)
+
     out = io.BytesIO(); doc.save(out)
     return out.getvalue()
+
+
+# Trames jaunes du modèle (fond « à compléter »).
+_JAUNES = {'FFFF00', 'FFFF99', 'FFFFCC'}
+
+def _enlever_surlignage_rempli(doc):
+    """Enlève le fond jaune (w:shd et w:highlight) des runs déjà REMPLIS. Un run est
+    « à compléter » — et garde donc son marqueur — s'il contient le caractère '…'
+    de BLANK. Parcourt corps + tableaux (les institutions sont dans des tableaux)."""
+    for r in doc.element.body.iter(qn('w:r')):
+        rpr = r.find(qn('w:rPr'))
+        if rpr is None:
+            continue
+        shd = rpr.find(qn('w:shd'))
+        hl = rpr.find(qn('w:highlight'))
+        jaune = False
+        if shd is not None and str(shd.get(qn('w:fill')) or '').upper() in _JAUNES:
+            jaune = True
+        if hl is not None and str(hl.get(qn('w:val')) or '').lower() == 'yellow':
+            jaune = True
+        if not jaune:
+            continue
+        texte = ''.join(t.text or '' for t in r.iter(qn('w:t')))
+        if '…' in texte:            # encore à compléter -> on garde le marqueur
+            continue
+        if shd is not None:
+            rpr.remove(shd)
+        if hl is not None:
+            rpr.remove(hl)
 
 
 def _regimes_du_payload(payload, cp_repertoire=None):

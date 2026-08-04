@@ -432,6 +432,50 @@ class TestBuildReglement:
         assert len(items) == 1
         assert items[0]['cp'] == '124' and items[0]['label'] == 'ouvriers'
 
+    def _nb_runs_jaunes(self, blob, motcle):
+        from docx import Document
+        from docx.oxml.ns import qn
+        d = Document(io.BytesIO(blob))
+        n = 0
+        for p in d.paragraphs:
+            if motcle.lower() not in p.text.lower():
+                continue
+            for r in p._element.iter(qn('w:r')):
+                rpr = r.find(qn('w:rPr'))
+                shd = rpr.find(qn('w:shd')) if rpr is not None else None
+                if shd is not None and str(shd.get(qn('w:fill')) or '').upper() == 'FFFF00':
+                    n += 1
+        return n
+
+    def test_cadre_horaire_respecte_les_jours_saisis(self):
+        # Bug du 04/08 : le cadre affichait « lundi au dimanche » par défaut.
+        payload = {'reglement_langue': 'FR', 'commission_paritaire': '200',
+                   'ouverture_debut': '08:00', 'ouverture_fin': '18:00',
+                   'ouverture_jour_debut': 0, 'ouverture_jour_fin': 4}
+        txt = _texte(R.build_reglement(payload, {'nom_societe': 'X'}, _tpl(TPL_FR)))
+        i = txt.find('jours de prestations pendant les semaines')
+        ligne = txt[i:i + 90]
+        assert 'lundi au vendredi' in ligne
+        assert 'dimanche' not in ligne
+
+    def test_surlignage_jaune_retire_des_champs_remplis(self):
+        # Cadre horaire rempli + adresses de contrôle -> plus de fond jaune.
+        payload = {'reglement_langue': 'FR', 'commission_paritaire': '200', 'seppt': 'Mensura',
+                   'ouverture_debut': '08:00', 'ouverture_fin': '18:00',
+                   'ouverture_jour_debut': 0, 'ouverture_jour_fin': 4}
+        # Adresse fournie -> le bureau régional du Contrôle des lois sociales est résolu.
+        identity = {'nom_societe': 'X', 'forme_juridique': 'SRL',
+                    'adresse_siege_social_1': 'Rue X 1', 'adresse_siege_social_2': '1000 Bruxelles'}
+        blob = R.build_reglement(payload, identity, _tpl(TPL_FR))
+        assert self._nb_runs_jaunes(blob, 'jours de prestations pendant') == 0
+        assert self._nb_runs_jaunes(blob, 'Contrôle des lois sociales') == 0
+
+    def test_surlignage_jaune_garde_sur_champ_vide(self):
+        # Sans jours saisis, le cadre reste « ………… au ………… » -> marqueur conservé.
+        payload = {'reglement_langue': 'FR', 'commission_paritaire': '200', 'seppt': 'Mensura'}
+        blob = R.build_reglement(payload, {'nom_societe': 'X'}, _tpl(TPL_FR))
+        assert self._nb_runs_jaunes(blob, 'jours de prestations pendant') >= 1
+
     def test_cameras_defaut_neant(self):
         txt = _texte(R.build_reglement({'reglement_langue': 'FR'}, {'nom_societe': 'X'}, _tpl(TPL_FR)))
         i = txt.find('surveillance par caméras comporte')
