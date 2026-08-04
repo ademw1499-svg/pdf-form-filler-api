@@ -15,7 +15,30 @@ from datetime import datetime
 from html import unescape as _unescape   # décode TOUTES les entités HTML (&Acirc; -> Â, &eacute; -> é…)
 
 app = Flask(__name__)
-CORS(app)
+# CORS restreint (audit 04/08, H1) : seul le portail (et le dev local) peuvent
+# appeler l'API depuis un navigateur. Les canaux machine (veilleurs) ne passent
+# pas par un navigateur et ne sont pas concernés par CORS.
+CORS(app, origins=[
+    'https://persoproject-portail.ademw1499.workers.dev',
+    'http://localhost:5173',
+])
+# Taille maximale des requêtes (audit 04/08, H2) : uploads PDF et JSON bornés.
+app.config['MAX_CONTENT_LENGTH'] = 15 * 1024 * 1024
+
+# Routes de debug/test : coupées en production (audit 04/08, H3) — elles
+# cartographient le serveur et renvoient des stack traces. Reactivables en local
+# via DEBUG_ROUTES=1.
+def _debug_actif():
+    return os.environ.get('DEBUG_ROUTES') == '1'
+
+
+def _jeton_machine_ok(req):
+    """Contrôle du jeton machine (X-Prestations-Token) en temps constant
+    (audit 04/08, H5 : les comparaisons `!=` sont remplacées par compare_digest,
+    déjà utilisé pour PC06_API_KEY)."""
+    attendu = os.environ.get('PRESTATIONS_TOKEN')
+    recu = req.headers.get('X-Prestations-Token') or ''
+    return bool(attendu) and hmac.compare_digest(recu, attendu)
 
 # ============== CONFIGURATION ==============
 TEMPLATES = {
@@ -207,6 +230,8 @@ def health():
 
 @app.route('/debug-config', methods=['GET'])
 def debug_config():
+    if not _debug_actif():
+        return jsonify({"error": "Not found"}), 404
     template_status = {}
     for key, filename in TEMPLATES.items():
         template_status[key] = {"filename": filename, "exists": os.path.exists(filename)}
@@ -407,6 +432,10 @@ def parse_etat_prestation(reader):
 @app.route('/parse-prestations', methods=['POST'])
 def parse_prestations():
     """Reçoit l'état Prisma (PDF) et renvoie les données structurées pour la grille."""
+    # Auth requise (audit 04/08, H2) : le portail envoyait déjà le jeton — le
+    # backend ne le lisait simplement pas. Upload anonyme = DoS/PDF piégé.
+    if not verify_user_token(request):
+        return jsonify({"error": "Non authentifié"}), 401
     f = request.files.get('file')
     if not f:
         return jsonify({"error": "Aucun fichier"}), 400
@@ -520,7 +549,7 @@ def get_prestations():
     token_attendu = os.environ.get('PRESTATIONS_TOKEN')
     if not token_attendu:
         return jsonify({"error": "PRESTATIONS_TOKEN non configuré"}), 503
-    if request.headers.get('X-Prestations-Token') != token_attendu:
+    if not hmac.compare_digest(request.headers.get('X-Prestations-Token') or '', token_attendu):
         return jsonify({"error": "Non autorisé"}), 401
     if not SUPABASE_URL or not SUPABASE_KEY:
         return jsonify({"error": "Supabase non configuré"}), 503
@@ -571,7 +600,7 @@ def prestations_a_traiter():
     token_attendu = os.environ.get('PRESTATIONS_TOKEN')
     if not token_attendu:
         return jsonify({"error": "PRESTATIONS_TOKEN non configuré"}), 503
-    if request.headers.get('X-Prestations-Token') != token_attendu:
+    if not hmac.compare_digest(request.headers.get('X-Prestations-Token') or '', token_attendu):
         return jsonify({"error": "Non autorisé"}), 401
     if not SUPABASE_URL or not SUPABASE_KEY:
         return jsonify({"error": "Supabase non configuré"}), 503
@@ -596,7 +625,7 @@ def prestations_marquer_traite():
     token_attendu = os.environ.get('PRESTATIONS_TOKEN')
     if not token_attendu:
         return jsonify({"error": "PRESTATIONS_TOKEN non configuré"}), 503
-    if request.headers.get('X-Prestations-Token') != token_attendu:
+    if not hmac.compare_digest(request.headers.get('X-Prestations-Token') or '', token_attendu):
         return jsonify({"error": "Non autorisé"}), 401
     if not SUPABASE_URL or not SUPABASE_KEY:
         return jsonify({"error": "Supabase non configuré"}), 503
@@ -708,7 +737,7 @@ def paie_lancer():
 def paie_a_traiter():
     """Le veilleur récupère les jobs paie 'pending' de SON poste."""
     token_attendu = os.environ.get('PRESTATIONS_TOKEN')
-    if not token_attendu or request.headers.get('X-Prestations-Token') != token_attendu:
+    if not token_attendu or not hmac.compare_digest(request.headers.get('X-Prestations-Token') or '', token_attendu):
         return jsonify({"error": "Non autorisé"}), 401
     poste = (request.args.get('poste') or '').strip()
     if not poste:
@@ -726,7 +755,7 @@ def paie_a_traiter():
 def paie_maj():
     """Le veilleur met à jour un job (statut + liste d'événements travailleur)."""
     token_attendu = os.environ.get('PRESTATIONS_TOKEN')
-    if not token_attendu or request.headers.get('X-Prestations-Token') != token_attendu:
+    if not token_attendu or not hmac.compare_digest(request.headers.get('X-Prestations-Token') or '', token_attendu):
         return jsonify({"error": "Non autorisé"}), 401
     d = request.get_json() or {}
     job_id = d.get('id')
@@ -770,8 +799,7 @@ def paie_job(job_id):
 # clés Supabase (variables Railway). Résultat : plus aucune clé Supabase sur le serveur.
 def _veilleur_autorise(req):
     """Auth machine (veilleur) : le jeton stable partagé, comme pour la paie."""
-    attendu = os.environ.get('PRESTATIONS_TOKEN')
-    return bool(attendu) and req.headers.get('X-Prestations-Token') == attendu
+    return _jeton_machine_ok(req)
 
 
 @app.route('/affiliations/a-traiter', methods=['GET'])
@@ -805,9 +833,12 @@ def affiliations_maj():
     if not SUPABASE_URL or not SUPABASE_KEY:
         return jsonify({"error": "Supabase non configuré"}), 503
     d = request.get_json() or {}
-    id_ = d.get('id')
-    if not id_:
-        return jsonify({"error": "id requis"}), 400
+    # id STRICTEMENT uuid/entier : il est interpolé dans l'URL PostgREST — sans
+    # ce garde, `1&statut=eq.pending` transformait le PATCH ciblé en PATCH de
+    # masse (audit 04/08, injection H8).
+    id_ = str(d.get('id') or '').strip()
+    if not re.fullmatch(r'[0-9a-fA-F-]{1,36}', id_):
+        return jsonify({"error": "id requis (uuid ou entier)"}), 400
     champs = {c: d[c] for c in ('statut', 'numero_employeur', 'message', 'traite_at',
                                 'manquants', 'institutions') if c in d}
     if not champs:
@@ -2330,6 +2361,8 @@ def generate_pdf_bytes(doc_type, data, lang_prefs=None):
 # ============== ZIP ENDPOINT ==============
 @app.route('/debug-request', methods=['POST'])
 def debug_request():
+    if not _debug_actif():
+        return jsonify({"error": "Not found"}), 404
     """Capture exactement ce que le frontend envoie."""
     data = request.get_json()
     if not data:
@@ -2350,6 +2383,11 @@ def debug_request():
 
 @app.route('/download-all-zip', methods=['POST'])
 def download_all_zip():
+    # Auth requise (audit 04/08, C3) : cette route écrivait le dossier en base
+    # (statut 'pending' -> file du robot d'encodage Prisma) SANS authentification.
+    # Le portail envoie désormais le jeton (deploy du 04/08).
+    if not verify_user_token(request):
+        return jsonify({"error": "Non authentifié"}), 401
     try:
         data = request.get_json()
         if not data: return jsonify({"error": "No data provided"}), 400
@@ -2404,6 +2442,8 @@ def download_all_zip():
 # ============== MAIN ==============
 @app.route('/debug-offre-raw', methods=['GET'])
 def debug_offre_raw():
+    if not _debug_actif():
+        return jsonify({"error": "Not found"}), 404
     """Retourne le template brut sans modification pour diagnostiquer les pages."""
     lang = request.args.get('lang', 'fr')
     tpl = TEMPLATES['offre_nl'] if lang == 'nl' else TEMPLATES['offre_fr']
@@ -2416,6 +2456,8 @@ def debug_offre_raw():
 
 @app.route('/debug-each', methods=['GET'])
 def debug_each():
+    if not _debug_actif():
+        return jsonify({"error": "Not found"}), 404
     """Teste chaque doc individuellement, retourne JSON avec status + erreur."""
     fake = {
         'nom_societe':'Test SPRL', 'forme_juridique':'SRL',
@@ -2469,6 +2511,8 @@ def debug_each():
 
 @app.route('/test-zip', methods=['GET'])
 def test_zip():
+    if not _debug_actif():
+        return jsonify({"error": "Not found"}), 404
     """Test endpoint — generates ZIP with all docs using fake data. No JS needed."""
     fake = {
         'nom_societe':'Test SPRL', 'forme_juridique':'SRL',
