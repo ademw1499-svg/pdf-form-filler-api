@@ -1003,10 +1003,23 @@ def _dump_vers_reglement(dump):
     return champs, noms_inst
 
 
+def _lecture_recente_ts(ts, heures=24):
+    """True si le timestamp ISO (Supabase, avec ou sans fuseau) a moins de
+    <heures> heures. Illisible -> False (on relit, jamais l'inverse)."""
+    try:
+        t = datetime.fromisoformat(str(ts).replace('Z', '+00:00'))
+        now = datetime.now(t.tzinfo) if t.tzinfo else datetime.now()
+        return (now - t).total_seconds() < heures * 3600
+    except Exception:
+        return False
+
+
 @app.route('/lectures/demande', methods=['POST'])
 def lectures_demande():
     """Le portail (gestionnaire connecté) demande la lecture d'une fiche Prisma.
-    Body: {numero}. Réponse: {id} à repasser à /lectures/etat."""
+    Body: {numero, forcer?}. Réponse: {id} à repasser à /lectures/etat —
+    {cache: true} si une lecture de la même fiche date de moins de 24 h
+    (résultat instantané, Prisma n'est pas re-sollicité). `forcer` relit."""
     if not verify_user_token(request):
         return jsonify({"error": "Non authentifié"}), 401
     if not SUPABASE_URL or not SUPABASE_KEY:
@@ -1015,6 +1028,18 @@ def lectures_demande():
     numero = str(d.get('numero') or '').strip()
     if not re.fullmatch(r'\d{1,6}', numero):
         return jsonify({"error": "numéro de dossier Prisma requis (chiffres seulement)"}), 400
+    if not d.get('forcer'):
+        try:
+            r = requests.get(
+                _cmd_url("?commande=eq.lecture_fiche&statut=eq.done"
+                         f"&args->>numero=eq.{numero}"
+                         "&order=traite_at.desc&limit=1&select=id,traite_at"),
+                headers=_supabase_headers(), timeout=15)
+            rows = r.json() if r.status_code < 300 else []
+            if rows and _lecture_recente_ts(rows[0].get('traite_at')):
+                return jsonify({"id": rows[0]['id'], "cache": True}), 200
+        except Exception:
+            pass                     # cache indisponible -> lecture normale
     try:
         r = requests.post(
             _cmd_url(),

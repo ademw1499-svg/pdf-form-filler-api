@@ -169,6 +169,35 @@ def test_etat_introuvable_404(client):
     assert client.get('/lectures/etat?id=99').status_code == 404
 
 
+# ---------- cache 24 h ----------
+
+def _ts_il_y_a(heures):
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) - timedelta(hours=heures)).isoformat()
+
+def test_demande_cache_fiche_lue_recemment(client):
+    # une lecture done de la même fiche il y a 2 h -> résultat instantané,
+    # AUCUNE nouvelle ligne enfilée (Prisma pas re-sollicité)
+    client.faux.get_corps = [[{'id': 42, 'traite_at': _ts_il_y_a(2)}]]
+    r = client.post('/lectures/demande', json={'numero': '2948'})
+    assert r.status_code == 200
+    assert r.get_json() == {'id': 42, 'cache': True}
+    assert not any(m == 'POST' for m, _, _ in client.faux.appels)
+
+def test_demande_cache_perime_relit(client):
+    client.faux.get_corps = [[{'id': 42, 'traite_at': _ts_il_y_a(30)}]]
+    r = client.post('/lectures/demande', json={'numero': '2948'})
+    assert r.status_code == 201                    # > 24 h -> vraie lecture
+    assert client.faux.appels[-1][0] == 'POST'
+
+def test_demande_forcer_ignore_le_cache(client):
+    client.faux.get_corps = [[{'id': 42, 'traite_at': _ts_il_y_a(1)}]]
+    r = client.post('/lectures/demande', json={'numero': '2948', 'forcer': True})
+    assert r.status_code == 201
+    # forcer -> pas même de requête cache : le seul appel est le POST
+    assert [m for m, _, _ in client.faux.appels] == ['POST']
+
+
 # ---------- mapping dump -> champs règlement ----------
 
 DUMP_COMPLET = {
