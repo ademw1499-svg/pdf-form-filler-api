@@ -1004,12 +1004,26 @@ def _dump_vers_reglement(dump):
         except ValueError:
             pass
 
+    # Institutions : on cible par CATÉGORIE (le champ 'type' du dump, fiable),
+    # pas par devinette de nom. Service médical = SEPPT ; Accident travail =
+    # assurance-loi. Repli sur la reconnaissance de nom pour les vieux dumps
+    # (banc de test) qui n'ont pas de 'type'.
     institutions, noms_inst = (dump or {}).get('institutions') or [], []
     for inst in institutions:
-        if isinstance(inst, dict):
-            nom = ' '.join(str(inst.get(k) or '') for k in ('nom1', 'nom2')).strip()
-            if nom:
-                noms_inst.append(nom)
+        if not isinstance(inst, dict):
+            continue
+        nom = ' '.join(str(inst.get(k) or '') for k in ('nom1', 'nom2')).strip()
+        if nom:
+            noms_inst.append(nom)
+        typ = str(inst.get('type') or '').lower()
+        nom1 = str(inst.get('nom1') or '').strip()
+        if 'médical' in typ or 'medical' in typ or 'geneeskun' in typ:
+            if nom1:
+                champs['seppt'] = nom1.title() if nom1.isupper() else nom1
+        elif 'accident' in typ or 'ongeval' in typ or 'travail' in typ:
+            if nom1:
+                champs['assurance_loi'] = nom1
+        elif not typ:                       # vieux dump sans 'type' -> repli nom
             bas = nom.lower()
             if 'seppt' not in champs and any(s in bas for s in _SEPPT_CONNUS):
                 champs['seppt'] = nom.title() if nom.isupper() else nom

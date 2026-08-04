@@ -209,9 +209,9 @@ DUMP_COMPLET = {
         'Langue off.': 'Français',
     },
     'institutions': [
-        {'nom1': 'OFF. NAT. SECURITE SOCIALE', 'nom2': ''},
-        {'nom1': 'MENSURA', 'nom2': 'Service Externe de Prévention'},
-        {'nom1': 'AXA', 'nom2': 'Assurance accidents du travail'},
+        {'type': 'ONSS', 'nom1': 'OFF. NAT. SECURITE SOCIALE', 'nom2': ''},
+        {'type': 'Service médical', 'nom1': 'MENSURA', 'nom2': 'SEPPT'},
+        {'type': 'Accident travail', 'nom1': 'AXA', 'nom2': 'Assurances'},
     ],
 }
 
@@ -240,6 +240,23 @@ def test_mapping_num_entreprise_invalide_ignore():
     champs, _ = app._dump_vers_reglement(
         {'general': {'No. entreprise': '123'}, 'institutions': []})
     assert 'num_entreprise' not in champs
+
+def test_institutions_ciblees_par_categorie():
+    # même si le nom n'est pas dans la liste connue, la CATÉGORIE suffit
+    champs, _ = app._dump_vers_reglement({'general': {}, 'institutions': [
+        {'type': 'Service médical', 'nom1': 'SEPPT REGIONAL XYZ'},
+        {'type': 'Accident travail', 'nom1': 'ASSUREUR LOCAL SA'},
+    ]})
+    assert champs['seppt'] == 'Seppt Regional Xyz'   # nom tout-en-majuscules -> Title
+    assert champs['assurance_loi'] == 'ASSUREUR LOCAL SA'
+
+def test_vieux_dump_sans_type_repli_sur_le_nom():
+    champs, _ = app._dump_vers_reglement({'general': {}, 'institutions': [
+        {'nom1': 'MENSURA', 'nom2': 'prévention'},
+        {'nom1': 'AXA', 'nom2': 'accidents'},
+    ]})
+    assert 'MENSURA' in champs['seppt'].upper()
+    assert champs['assurance_loi'].startswith('AXA')
 
 def test_mapping_heures_a_la_demi():
     champs, _ = app._dump_vers_reglement(
