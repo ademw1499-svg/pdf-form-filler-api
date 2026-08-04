@@ -1,0 +1,45 @@
+# CI backend — exécutée sur chaque push et chaque pull request.
+# Objectif : Railway ne déploie plus jamais du code dont les tests échouent.
+# (Audit du 04/08 : ~260 tests existaient mais n'étaient lancés qu'à la main.)
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Tests
+        # PERSOPROJECT_SANS_BUNDLE : les modèles Word officiels vivent hors dépôt
+        # (documents PersoProject) ; en CI on lance donc la partie qui n'en dépend
+        # pas. Le sweep complet reste à lancer localement avec le bundle.
+        env:
+          PERSOPROJECT_SANS_BUNDLE: '1'
+        run: python -m pytest tests/ -q
+
+  securite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Vulnérabilités des dépendances
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit -r requirements.txt --strict || true   # informatif tant que le bump n'est pas fait
