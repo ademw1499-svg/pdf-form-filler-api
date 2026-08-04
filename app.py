@@ -970,6 +970,14 @@ def _dump_vers_reglement(dump):
     if _v('Code postal') or _v('Localite'):
         champs['adresse_siege_social_2'] = (_v('Code postal') + ' ' + _v('Localite')).strip()
 
+    # N° d'entreprise : la clé du chaînage automatique côté portail (il le met
+    # dans le champ BCE et lance la recherche BCE tout seul).
+    num_ent = re.sub(r'\D', '', _v('No. entreprise') or _v('TVA (numero)'))
+    if len(num_ent) == 10:
+        champs['num_entreprise'] = num_ent
+    if _v('N ONSS'):
+        champs['num_onss'] = _v('N ONSS')
+
     cp_texte = _v('Comm. paritaire')            # ex. "329.02 (Français)"
     m = re.match(r'\s*(\d{3}(?:\.\d{1,2})?)', cp_texte)
     if m:
@@ -978,6 +986,13 @@ def _dump_vers_reglement(dump):
     if 'fran' in bas:                            # "(Français)" même mal encodé
         champs['reglement_langue'] = 'FR'
     elif 'neder' in bas or 'vlaam' in bas:
+        champs['reglement_langue'] = 'NL'
+    # « Langue off. » de la fiche est plus fiable que le suffixe du libellé CP :
+    # elle gagne quand les deux existent.
+    lng = _v('Langue off.').lower()
+    if 'fran' in lng:
+        champs['reglement_langue'] = 'FR'
+    elif 'neder' in lng or 'vlaam' in lng:
         champs['reglement_langue'] = 'NL'
 
     hrs = _v('Hrs/sem.')                         # ex. "38,00" ou "36,50"

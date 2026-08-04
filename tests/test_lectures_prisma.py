@@ -205,6 +205,8 @@ DUMP_COMPLET = {
         'Nom': 'THE HEALDER', 'Adresse (rue)': 'Avenue Louise', 'No.': '523',
         'Code postal': '1050', 'Localite': 'Bruxelles',
         'Comm. paritaire': '329.02 (Français)', 'Hrs/sem.': '38,00',
+        'No. entreprise': '1022.992.781', 'N ONSS': '1482420-92',
+        'Langue off.': 'Français',
     },
     'institutions': [
         {'nom1': 'OFF. NAT. SECURITE SOCIALE', 'nom2': ''},
@@ -221,9 +223,23 @@ def test_mapping_complet():
     assert champs['commission_paritaire'] == '329.02'
     assert champs['reglement_langue'] == 'FR'
     assert champs['regime_horaire'] == '38'
+    assert champs['num_entreprise'] == '1022992781'     # normalisé (le portail chaîne la BCE)
+    assert champs['num_onss'] == '1482420-92'
     assert 'MENSURA' in champs['seppt'].upper()
     assert champs['assurance_loi'].startswith('AXA')
     assert len(institutions) == 3
+
+def test_mapping_langue_off_gagne_sur_le_libelle_cp():
+    # fiche NL avec une CP au libellé français : « Langue off. » fait foi
+    champs, _ = app._dump_vers_reglement(
+        {'general': {'Comm. paritaire': '200 (Français)', 'Langue off.': 'Nederlands'},
+         'institutions': []})
+    assert champs['reglement_langue'] == 'NL'
+
+def test_mapping_num_entreprise_invalide_ignore():
+    champs, _ = app._dump_vers_reglement(
+        {'general': {'No. entreprise': '123'}, 'institutions': []})
+    assert 'num_entreprise' not in champs
 
 def test_mapping_heures_a_la_demi():
     champs, _ = app._dump_vers_reglement(
