@@ -933,6 +933,187 @@ def affiliations_liste():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ============== LECTURES PRISMA : consultation LECTURE SEULE du serveur ==============
+# Le portail veut préremplir un règlement de travail avec ce que Prisma sait déjà
+# (CP, langue, heures/semaine, adresse, SEPPT, assurance-loi). Un « lecteur » tourne
+# sur le serveur Prisma et n'exécute QUE `encode_societe.py dumpfiche <n°>` — un
+# dump en lecture seule qui ne clique jamais le crayon (cmdAanvaarden). File
+# d'attente = table Supabase `commandes` (déjà en place), commande='lecture_fiche'.
+# Aucune écriture Prisma n'est possible par ce chemin : le lecteur ignore tout
+# autre type de commande, et le backend n'enfile QUE des lecture_fiche ici.
+
+def _cmd_url(extra=''):
+    return f"{SUPABASE_URL}/rest/v1/commandes{extra}"
+
+
+# SEPPT et assureurs-loi reconnus dans la liste d'institutions d'une fiche.
+_SEPPT_CONNUS = ('mensura', 'liantis', 'attentia', 'idewe', 'cesi', 'securex',
+                 'proviko', 'mediwet', 'adhesia', 'arista', 'cohezio', 'premed', 'spmt')
+_ASSUREURS_LOI = ('axa', 'ag insurance', 'ethias', 'baloise', 'kbc', 'allianz',
+                  'p&v', 'federale assurance', 'vivium', 'belfius', 'generali', 'fidea')
+
+
+def _dump_vers_reglement(dump):
+    """Dump de fiche Prisma -> champs préremplissables du règlement de travail.
+    Ne renvoie QUE ce qui a réellement été trouvé (le portail ne remplit que
+    les champs encore vides chez lui)."""
+    champs = {}
+    g = (dump or {}).get('general') or {}
+
+    def _v(cle):
+        return str(g.get(cle) or '').strip()
+
+    if _v('Nom'):
+        champs['nom_societe'] = _v('Nom')
+    if _v('Adresse (rue)'):
+        champs['adresse_siege_social'] = (_v('Adresse (rue)') + ' ' + _v('No.')).strip()
+    if _v('Code postal') or _v('Localite'):
+        champs['adresse_siege_social_2'] = (_v('Code postal') + ' ' + _v('Localite')).strip()
+
+    cp_texte = _v('Comm. paritaire')            # ex. "329.02 (Français)"
+    m = re.match(r'\s*(\d{3}(?:\.\d{1,2})?)', cp_texte)
+    if m:
+        champs['commission_paritaire'] = m.group(1)
+    bas = cp_texte.lower()
+    if 'fran' in bas:                            # "(Français)" même mal encodé
+        champs['reglement_langue'] = 'FR'
+    elif 'neder' in bas or 'vlaam' in bas:
+        champs['reglement_langue'] = 'NL'
+
+    hrs = _v('Hrs/sem.')                         # ex. "38,00" ou "36,50"
+    if hrs:
+        try:
+            val = float(hrs.replace(',', '.'))
+            entier, minutes = int(val), round((float(val) - int(val)) * 60)
+            champs['regime_horaire'] = str(entier) if not minutes else f"{entier}h{minutes:02d}"
+        except ValueError:
+            pass
+
+    institutions, noms_inst = (dump or {}).get('institutions') or [], []
+    for inst in institutions:
+        if isinstance(inst, dict):
+            nom = ' '.join(str(inst.get(k) or '') for k in ('nom1', 'nom2')).strip()
+            if nom:
+                noms_inst.append(nom)
+            bas = nom.lower()
+            if 'seppt' not in champs and any(s in bas for s in _SEPPT_CONNUS):
+                champs['seppt'] = nom.title() if nom.isupper() else nom
+            if 'assurance_loi' not in champs and any(a in bas for a in _ASSUREURS_LOI):
+                champs['assurance_loi'] = nom
+    return champs, noms_inst
+
+
+@app.route('/lectures/demande', methods=['POST'])
+def lectures_demande():
+    """Le portail (gestionnaire connecté) demande la lecture d'une fiche Prisma.
+    Body: {numero}. Réponse: {id} à repasser à /lectures/etat."""
+    if not verify_user_token(request):
+        return jsonify({"error": "Non authentifié"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    d = request.get_json() or {}
+    numero = str(d.get('numero') or '').strip()
+    if not re.fullmatch(r'\d{1,6}', numero):
+        return jsonify({"error": "numéro de dossier Prisma requis (chiffres seulement)"}), 400
+    try:
+        r = requests.post(
+            _cmd_url(),
+            headers={**_supabase_headers(), 'Content-Type': 'application/json',
+                     'Prefer': 'return=representation'},
+            json={"commande": "lecture_fiche", "args": {"numero": numero},
+                  "statut": "pending"}, timeout=15)
+        if r.status_code >= 300:
+            return jsonify({"error": f"Supabase {r.status_code}: {r.text[:200]}"}), 500
+        rows = r.json()
+        return jsonify({"id": (rows[0] or {}).get('id')}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/lectures/a-faire', methods=['GET'])
+def lectures_a_faire():
+    """Le lecteur du serveur Prisma réclame les lectures en attente. Le PATCH
+    filtré pending->running sert de « prise » atomique : deux appels ne peuvent
+    pas ramasser la même ligne."""
+    if not _veilleur_autorise(request):
+        return jsonify({"error": "Non autorisé"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    try:
+        r = requests.patch(
+            _cmd_url("?commande=eq.lecture_fiche&statut=eq.pending"),
+            headers={**_supabase_headers(), 'Content-Type': 'application/json',
+                     'Prefer': 'return=representation'},
+            json={"statut": "running"}, timeout=15)
+        rows = r.json() if r.status_code < 300 else []
+        return jsonify(rows if isinstance(rows, list) else []), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/lectures/resultat', methods=['POST'])
+def lectures_resultat():
+    """Le lecteur renvoie le dump (ou l'erreur). Body: {id, ok, dump?|erreur?}."""
+    if not _veilleur_autorise(request):
+        return jsonify({"error": "Non autorisé"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    d = request.get_json() or {}
+    id_ = str(d.get('id') or '').strip()
+    if not re.fullmatch(r'\d{1,12}', id_):     # id interpolé dans l'URL PostgREST
+        return jsonify({"error": "id requis (entier)"}), 400
+    ok = bool(d.get('ok'))
+    corps = d.get('dump') if ok else {"erreur": str(d.get('erreur') or 'inconnue')[:2000]}
+    champs = {"statut": "done" if ok else "erreur",
+              "resultat": json.dumps(corps, ensure_ascii=False),
+              "traite_at": datetime.now().isoformat()}
+    try:
+        r = requests.patch(_cmd_url(f"?id=eq.{id_}"),
+                           headers={**_supabase_headers(), 'Content-Type': 'application/json',
+                                    'Prefer': 'return=minimal'},
+                           json=champs, timeout=15)
+        if r.status_code >= 300:
+            return jsonify({"error": f"Supabase {r.status_code}: {r.text[:200]}"}), 500
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/lectures/etat', methods=['GET'])
+def lectures_etat():
+    """Le portail sonde l'avancement d'une lecture : ?id=<n>. Réponse:
+    {statut, champs?, institutions?, erreur?} — champs = prêt-à-préremplir."""
+    if not verify_user_token(request):
+        return jsonify({"error": "Non authentifié"}), 401
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "Supabase non configuré"}), 503
+    id_ = str(request.args.get('id') or '').strip()
+    if not re.fullmatch(r'\d{1,12}', id_):
+        return jsonify({"error": "id requis (entier)"}), 400
+    try:
+        r = requests.get(_cmd_url(f"?id=eq.{id_}&select=id,statut,resultat,created_at"),
+                         headers=_supabase_headers(), timeout=15)
+        rows = r.json() if r.status_code < 300 else []
+        if not rows:
+            return jsonify({"error": "lecture introuvable"}), 404
+        row = rows[0]
+        statut = row.get('statut') or 'pending'
+        if statut not in ('done', 'erreur'):
+            return jsonify({"statut": statut}), 200
+        try:
+            corps = json.loads(row.get('resultat') or '{}')
+        except ValueError:
+            corps = {}
+        if statut == 'erreur' or 'erreur' in corps:
+            return jsonify({"statut": "erreur",
+                            "erreur": str(corps.get('erreur') or 'inconnue')}), 200
+        champs, institutions = _dump_vers_reglement(corps)
+        return jsonify({"statut": "done", "champs": champs,
+                        "institutions": institutions}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ============== BCE / BANQUE-CARREFOUR DES ENTREPRISES ==============
 def _bce_forme(texte, lang='fr'):
     """Texte 'Forme légale / Rechtsvorm' BCE -> forme normalisée, DANS LA LANGUE
