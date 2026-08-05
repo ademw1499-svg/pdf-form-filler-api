@@ -1043,13 +1043,19 @@ def _lecture_recente_ts(ts, heures=24):
         return False
 
 
+def _lecture_auth(req):
+    """Autorise le portail (gestionnaire connecté) OU le serveur (jeton machine).
+    Le jeton machine sert aux tests/diagnostics end-to-end depuis le serveur."""
+    return bool(verify_user_token(req)) or _jeton_machine_ok(req)
+
+
 @app.route('/lectures/demande', methods=['POST'])
 def lectures_demande():
     """Le portail (gestionnaire connecté) demande la lecture d'une fiche Prisma.
     Body: {numero, forcer?}. Réponse: {id} à repasser à /lectures/etat —
-    {cache: true} si une lecture de la même fiche date de moins de 24 h
-    (résultat instantané, Prisma n'est pas re-sollicité). `forcer` relit."""
-    if not verify_user_token(request):
+    {cache: true} si une lecture EXPLOITABLE de la même fiche date de moins de
+    24 h (résultat instantané, Prisma n'est pas re-sollicité). `forcer` relit."""
+    if not _lecture_auth(request):
         return jsonify({"error": "Non authentifié"}), 401
     if not SUPABASE_URL or not SUPABASE_KEY:
         return jsonify({"error": "Supabase non configuré"}), 503
@@ -1062,11 +1068,20 @@ def lectures_demande():
             r = requests.get(
                 _cmd_url("?commande=eq.lecture_fiche&statut=eq.done"
                          f"&args->>numero=eq.{numero}"
-                         "&order=traite_at.desc&limit=1&select=id,traite_at"),
+                         "&order=traite_at.desc&limit=1&select=id,traite_at,resultat"),
                 headers=_supabase_headers(), timeout=15)
             rows = r.json() if r.status_code < 300 else []
             if rows and _lecture_recente_ts(rows[0].get('traite_at')):
-                return jsonify({"id": rows[0]['id'], "cache": True}), 200
+                # Ne resservir le cache QUE s'il donne vraiment des champs : une
+                # ancienne lecture ratée (dump vide, stockée 'done' avant le
+                # correctif) ne doit plus court-circuiter une vraie relecture.
+                try:
+                    corps = json.loads(rows[0].get('resultat') or '{}')
+                except ValueError:
+                    corps = {}
+                champs_cache, _i = _dump_vers_reglement(corps)
+                if champs_cache:
+                    return jsonify({"id": rows[0]['id'], "cache": True}), 200
         except Exception:
             pass                     # cache indisponible -> lecture normale
     try:
@@ -1117,8 +1132,21 @@ def lectures_resultat():
     if not re.fullmatch(r'\d{1,12}', id_):     # id interpolé dans l'URL PostgREST
         return jsonify({"error": "id requis (entier)"}), 400
     ok = bool(d.get('ok'))
-    corps = d.get('dump') if ok else {"erreur": str(d.get('erreur') or 'inconnue')[:2000]}
-    champs = {"statut": "done" if ok else "erreur",
+    if ok:
+        dump = d.get('dump') or {}
+        # 'done' UNIQUEMENT si la lecture donne des champs exploitables. Sinon
+        # (fiche vide, onglet manqué, mémo non fermé...) -> 'erreur', pour que le
+        # cache 24 h ne resserve JAMAIS un vide et que le portail affiche un vrai
+        # message au lieu d'un « rien à préremplir » trompeur.
+        champs_dump, _i = _dump_vers_reglement(dump)
+        if champs_dump:
+            corps, statut = dump, "done"
+        else:
+            err = " | ".join(dump.get("erreurs") or []) or "fiche lue mais aucun champ exploitable"
+            corps, statut = {"erreur": err[:2000], "vide": True}, "erreur"
+    else:
+        corps, statut = {"erreur": str(d.get('erreur') or 'inconnue')[:2000]}, "erreur"
+    champs = {"statut": statut,
               "resultat": json.dumps(corps, ensure_ascii=False),
               "traite_at": datetime.now().isoformat()}
     try:
@@ -1137,7 +1165,7 @@ def lectures_resultat():
 def lectures_etat():
     """Le portail sonde l'avancement d'une lecture : ?id=<n>. Réponse:
     {statut, champs?, institutions?, erreur?} — champs = prêt-à-préremplir."""
-    if not verify_user_token(request):
+    if not _lecture_auth(request):
         return jsonify({"error": "Non authentifié"}), 401
     if not SUPABASE_URL or not SUPABASE_KEY:
         return jsonify({"error": "Supabase non configuré"}), 503

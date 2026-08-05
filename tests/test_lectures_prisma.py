@@ -143,6 +143,16 @@ def test_resultat_erreur_ecrit_erreur(client):
     assert kw['json']['statut'] == 'erreur'
     assert 'fiche verrouill' in kw['json']['resultat']
 
+def test_resultat_ok_mais_vide_nest_pas_cache(client):
+    # dump techniquement OK mais SANS champs exploitables -> stocké 'erreur'
+    # (jamais 'done'), pour que le cache 24 h ne resserve pas ce vide.
+    client.post('/lectures/resultat', headers=H,
+                json={'id': 7, 'ok': True,
+                      'dump': {'general': {}, 'erreurs': ['fiche non détectée']}})
+    _, _, kw = client.faux.appels[-1]
+    assert kw['json']['statut'] == 'erreur'
+    assert 'fiche non' in kw['json']['resultat']
+
 def test_etat_en_cours_puis_done(client):
     client.faux.get_corps = [[{'id': 7, 'statut': 'running', 'resultat': None}]]
     r = client.get('/lectures/etat?id=7')
@@ -175,14 +185,25 @@ def _ts_il_y_a(heures):
     from datetime import datetime, timedelta, timezone
     return (datetime.now(timezone.utc) - timedelta(hours=heures)).isoformat()
 
+_DUMP_UTILE = json.dumps({'general': {'Nom': 'ACME', 'Comm. paritaire': '200'}})
+
 def test_demande_cache_fiche_lue_recemment(client):
-    # une lecture done de la même fiche il y a 2 h -> résultat instantané,
-    # AUCUNE nouvelle ligne enfilée (Prisma pas re-sollicité)
-    client.faux.get_corps = [[{'id': 42, 'traite_at': _ts_il_y_a(2)}]]
+    # une lecture done EXPLOITABLE de la même fiche il y a 2 h -> résultat
+    # instantané, AUCUNE nouvelle ligne enfilée (Prisma pas re-sollicité)
+    client.faux.get_corps = [[{'id': 42, 'traite_at': _ts_il_y_a(2), 'resultat': _DUMP_UTILE}]]
     r = client.post('/lectures/demande', json={'numero': '2948'})
     assert r.status_code == 200
     assert r.get_json() == {'id': 42, 'cache': True}
     assert not any(m == 'POST' for m, _, _ in client.faux.appels)
+
+def test_demande_cache_vide_ignore_et_relit(client):
+    # une ancienne lecture 'done' mais SANS champs exploitables (bug d'avant le
+    # correctif) ne doit PAS court-circuiter : on refait une vraie lecture.
+    client.faux.get_corps = [[{'id': 42, 'traite_at': _ts_il_y_a(2),
+                               'resultat': json.dumps({'general': {}, 'erreurs': ['fiche non détectée']})}]]
+    r = client.post('/lectures/demande', json={'numero': '2948'})
+    assert r.status_code == 201                     # cache vide ignoré -> POST
+    assert client.faux.appels[-1][0] == 'POST'
 
 def test_demande_cache_perime_relit(client):
     client.faux.get_corps = [[{'id': 42, 'traite_at': _ts_il_y_a(30)}]]
